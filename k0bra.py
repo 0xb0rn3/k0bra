@@ -21,7 +21,7 @@ def display_banner():
                                          
   """
     print(banner)
-    print("Welcome to k0bra - The Python Network Scavenger! Developed by b0urn3.\n")
+    print("Welcome to k0bra - The Network Scavenger! Developed by b0urn3.\n other tools found at https://github.com/q4n0 | [Email] b0urn3@proton.me\n Social handles [Instagram]: onlybyhive")
 
 # Function to get MAC address of an IP
 def get_mac(ip: str) -> str:
