@@ -8,9 +8,14 @@ import json
 import argparse
 import socket
 import asyncio
-from typing import List, Dict, Optional
+import logging
+from typing import List, Dict
+from concurrent.futures import ThreadPoolExecutor
+import platform
 
-# Function to display the banner
+# Set up logging
+logging.basicConfig(filename='k0bra.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
 def display_banner():
     banner = """
 ██   ██  ██████  ██████  ██████   █████  
@@ -23,7 +28,6 @@ def display_banner():
     print(banner)
     print("Welcome to k0bra - The Network Scavenger! Developed by b0urn3.\n other tools found at https://github.com/q4n0\nEmail: b0urn3@proton.me Instagram: onlybyhive")
 
-# Function to get MAC address of an IP
 def get_mac(ip: str) -> str:
     try:
         arp_request = scapy.ARP(pdst=ip)
@@ -34,10 +38,9 @@ def get_mac(ip: str) -> str:
             return answered_list[0][1].hwsrc
         return "N/A"
     except Exception as e:
-        print(f"Error getting MAC for IP {ip}: {e}")
+        logging.error(f"Error getting MAC for IP {ip}: {e}")
         return "Error"
 
-# Function to get the network interface
 def get_interface() -> str:
     interfaces = ni.interfaces()
     current_iface = ni.gateways()['default'][ni.AF_INET][1]
@@ -55,22 +58,17 @@ def get_interface() -> str:
         selected_iface = current_iface
     return selected_iface
 
-# Function to get IP-MAC pairs
 def get_ip_mac_pairs(interface: str, ip_range: str) -> List[Dict[str, str]]:
     arp_request = scapy.ARP(pdst=ip_range)
     broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
     arp_request_broadcast = broadcast / arp_request
     answered_list = scapy.srp(arp_request_broadcast, timeout=2, verbose=False)[0]
+    return [{"IP": element[1].psrc, "MAC": element[1].hwsrc} for element in answered_list]
 
-    devices = []
-    for element in answered_list:
-        devices.append({"IP": element[1].psrc, "MAC": element[1].hwsrc})
-    return devices
-
-# Function to perform port scanning
 def scan_ports(ip: str, ports: List[int]) -> List[int]:
     open_ports = []
-    for port in ports:
+
+    def check_port(port):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         socket.setdefaulttimeout(1)
         try:
@@ -78,21 +76,15 @@ def scan_ports(ip: str, ports: List[int]) -> List[int]:
             if result == 0:
                 open_ports.append(port)
         except Exception as e:
-            print(f"Error scanning port {port} on IP {ip}: {e}")
+            logging.error(f"Error scanning port {port} on IP {ip}: {e}")
         finally:
             sock.close()
+
+    with ThreadPoolExecutor() as executor:
+        executor.map(check_port, ports)
+
     return open_ports
 
-# Function to get live hosts
-def get_live_hosts(ip_range: str) -> List[str]:
-    arp_request = scapy.ARP(pdst=ip_range)
-    broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
-    arp_request_broadcast = broadcast / arp_request
-    answered_list = scapy.srp(arp_request_broadcast, timeout=1, verbose=False)[0]
-
-    return [element[1].psrc for element in answered_list]
-
-# Asynchronous function to handle scanning
 async def async_scan(ip_range: str, interface: str, ports: List[int], save_results_option: bool, filters: Dict[str, str]):
     loop = asyncio.get_event_loop()
     devices = await loop.run_in_executor(None, lambda: get_ip_mac_pairs(interface, ip_range))
@@ -103,20 +95,16 @@ async def async_scan(ip_range: str, interface: str, ports: List[int], save_resul
     if save_results_option:
         save_results(filtered_devices, 'scan_results.json')
 
-# Function to apply filters to devices
 def apply_filters(devices: List[Dict[str, str]], filters: Dict[str, str]) -> List[Dict[str, str]]:
     filtered_devices = []
     for device in devices:
-        if 'ip' in filters:
-            if not device['IP'].startswith(filters['ip']):
-                continue
-        if 'mac_prefix' in filters:
-            if not device['MAC'].startswith(filters['mac_prefix']):
-                continue
+        if 'ip' in filters and not device['IP'].startswith(filters['ip']):
+            continue
+        if 'mac_prefix' in filters and not device['MAC'].startswith(filters['mac_prefix']):
+            continue
         filtered_devices.append(device)
     return filtered_devices
 
-# Function to display results
 def display_results(devices: List[Dict[str, str]], ports: List[int]):
     if devices:
         table = tabulate(devices, headers="keys", tablefmt="fancy_grid")
@@ -128,16 +116,14 @@ def display_results(devices: List[Dict[str, str]], ports: List[int]):
     else:
         print("No devices found on the network.")
 
-# Function to save results to a file
 def save_results(devices: List[Dict[str, str]], filename: str):
     try:
         with open(filename, 'w') as f:
             json.dump(devices, f, indent=4)
         print(f"Results saved to {filename}")
     except Exception as e:
-        print(f"Error saving results: {e}")
+        logging.error(f"Error saving results: {e}")
 
-# Function to handle scanning
 def scan_network(interface: str, save_results_option: bool, ports: List[int], filters: Dict[str, str]):
     ip_info = ni.ifaddresses(interface).get(ni.AF_INET)
     if not ip_info:
@@ -156,24 +142,20 @@ def scan_network(interface: str, save_results_option: bool, ports: List[int], fi
         print("\nScan interrupted. Exiting gracefully...")
         clear_terminal()
         print("Exiting k0bra. Goodbye!")
-        exit(0)  # Ensure the script exits cleanly
+        exit(0)
 
-# Function to check for existing scan results
 def load_previous_scan(filename: str) -> List[Dict[str, str]]:
     if os.path.exists(filename):
         try:
             with open(filename, 'r') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Error loading previous scan results: {e}")
+            logging.error(f"Error loading previous scan results: {e}")
     return []
 
-# Function to clear terminal screen
 def clear_terminal():
-    os.system('clear')  # For Unix-like systems
-    # os.system('cls')  # Uncomment this line for Windows
+    os.system('cls' if platform.system() == 'Windows' else 'clear')
 
-# Main function
 def main():
     display_banner()
     
