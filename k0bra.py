@@ -16,6 +16,9 @@ import platform
 # Set up logging
 logging.basicConfig(filename='k0bra.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Known MAC addresses for whitelist
+KNOWN_MACS = ["aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66"]  # Add known trusted devices here
+
 def display_banner():
     banner = """
 ██   ██  ██████  ██████  ██████   █████  
@@ -35,11 +38,19 @@ def get_mac(ip: str) -> str:
         arp_request_broadcast = broadcast / arp_request
         answered_list = scapy.srp(arp_request_broadcast, timeout=1, verbose=False)[0]
         if answered_list:
-            return answered_list[0][1].hwsrc
+            mac = answered_list[0][1].hwsrc
+            return mac
         return "N/A"
     except Exception as e:
         logging.error(f"Error getting MAC for IP {ip}: {e}")
         return "Error"
+
+def detect_unauthorized_device(mac: str) -> bool:
+    if mac not in KNOWN_MACS and mac != "N/A":
+        logging.warning(f"Unauthorized device detected: MAC {mac}")
+        print(f"⚠️  Unauthorized device detected! MAC: {mac}")
+        return True
+    return False
 
 def get_interface() -> str:
     interfaces = ni.interfaces()
@@ -63,7 +74,13 @@ def get_ip_mac_pairs(interface: str, ip_range: str) -> List[Dict[str, str]]:
     broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
     arp_request_broadcast = broadcast / arp_request
     answered_list = scapy.srp(arp_request_broadcast, timeout=2, verbose=False)[0]
-    return [{"IP": element[1].psrc, "MAC": element[1].hwsrc} for element in answered_list]
+    devices = []
+    for element in answered_list:
+        device = {"IP": element[1].psrc, "MAC": element[1].hwsrc}
+        devices.append(device)
+        # Check for unauthorized device
+        detect_unauthorized_device(device['MAC'])
+    return devices
 
 def scan_ports(ip: str, ports: List[int]) -> List[int]:
     open_ports = []
@@ -168,24 +185,20 @@ def main():
     args = parser.parse_args()
 
     selected_iface = get_interface()
-    print(f"\nStarting scan on interface: {selected_iface}\n")
-    time.sleep(1)
-    
+    print(f"Selected network interface: {selected_iface}")
+
     filters = {}
     if args.ip_filter:
         filters['ip'] = args.ip_filter
     if args.mac_filter:
         filters['mac_prefix'] = args.mac_filter
     
-    previous_results = load_previous_scan('scan_results.json') if args.restore else []
-    
-    try:
-        scan_network(selected_iface, args.save, args.ports, filters)
-    except KeyboardInterrupt:
-        print("\nKeyboard interrupt detected. Exiting gracefully...")
-        clear_terminal()
-        print("Exiting k0bra. Goodbye!")
-        exit(0)
+    if args.restore:
+        previous_scan = load_previous_scan('scan_results.json')
+        print("\nPrevious Scan Results:")
+        print(tabulate(previous_scan, headers="keys", tablefmt="fancy_grid"))
+
+    scan_network(selected_iface, args.save, args.ports, filters)
 
 if __name__ == "__main__":
     main()
