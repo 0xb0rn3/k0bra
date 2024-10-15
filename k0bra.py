@@ -2,6 +2,8 @@ import scapy.all as scapy
 import netifaces
 import sys
 import csv
+import subprocess
+import os
 from typing import List, Dict
 
 def print_header():
@@ -13,6 +15,19 @@ def print_header():
     print("Welcome to k0bra - The Network Scavenger! Developed by b0urn3.")
     print("Other tools found at https://github.com/q4n0")
     print("Email: b0urn3@proton.me Instagram: onlybyhive\n")
+
+def is_masscan_installed() -> bool:
+    """Check if Masscan is installed."""
+    try:
+        subprocess.run(["masscan", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True
+    except FileNotFoundError:
+        return False
+
+def install_masscan():
+    """Install Masscan in the background."""
+    print("Masscan not found. Installing in the background...")
+    os.system("sudo apt-get install -y masscan &")
 
 def get_active_interfaces() -> List[str]:
     interfaces = netifaces.interfaces()
@@ -56,20 +71,64 @@ def get_ip_mac_pairs(ip_range: str) -> List[Dict[str, str]]:
         print(f"Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}")  # Debug output
     return devices
 
-def save_results_to_csv(devices: List[Dict[str, str]], output_file: str):
-    """Save the found devices to a CSV file."""
+def masscan_scan(ip_range: str) -> Dict[str, List[int]]:
+    """Use Masscan to scan all ports on the specified IP range with stealth parameters."""
+    masscan_results = {}
+    
+    # Set stealth parameters
+    stealth_options = "--rate 50000"  # Stealth options for Masscan
+
+    # Run Masscan command
+    command = f"masscan {ip_range} -p0-65535 {stealth_options} --wait 2"
+    try:
+        result = subprocess.check_output(command, shell=True, text=True)
+        for line in result.splitlines():
+            if line.startswith('Discovered'):
+                parts = line.split()
+                ip = parts[3]  # Extract IP from the output
+                port = int(parts[5])  # Extract port from the output
+                if ip not in masscan_results:
+                    masscan_results[ip] = []
+                masscan_results[ip].append(port)
+    except subprocess.CalledProcessError as e:
+        print(f"Masscan failed: {e}")
+    return masscan_results
+
+def scan_all_ports(devices: List[Dict[str, str]]) -> Dict[str, List[int]]:
+    """Scan open ports on all devices using Masscan."""
+    results = {}
+    ip_range = ','.join(device['IP'] for device in devices)
+    print(f"Using Masscan to scan range: {ip_range}")
+    masscan_results = masscan_scan(ip_range)
+    
+    for device in devices:
+        ip = device['IP']
+        if ip in masscan_results:
+            results[ip] = masscan_results[ip]  # Store open ports for each IP
+    return results
+
+def save_results_to_csv(devices: List[Dict[str, str]], open_ports: Dict[str, List[int]], output_file: str):
+    """Save the found devices and their open ports to a CSV file."""
     with open(output_file, 'w', newline='') as csvfile:
-        fieldnames = ['IP', 'MAC']
+        fieldnames = ['IP', 'MAC', 'Open Ports']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         writer.writeheader()
         for device in devices:
-            writer.writerow(device)
+            ip = device['IP']
+            mac = device['MAC']
+            ports = ', '.join(map(str, open_ports.get(ip, [])))
+            writer.writerow({'IP': ip, 'MAC': mac, 'Open Ports': ports})
 
     print(f"Results saved to {output_file}")
 
 def main():
     print_header()
+
+    if not is_masscan_installed():
+        install_masscan()
+        print("Please run the script again after Masscan installation.")
+        sys.exit(1)
 
     active_interfaces = get_active_interfaces()
     if not active_interfaces:
@@ -110,11 +169,23 @@ def main():
         for device in devices:
             print(f"IP: {device['IP']}, MAC: {device['MAC']}")
 
-        # Prompt to save results
-        save_choice = input("Do you want to save the results to a CSV file? (y/n): ").strip().lower()
+        print("Scanning for open ports on all discovered devices using Masscan...")
+        open_ports_results = scan_all_ports(devices)
+
+        for device in devices:
+            ip = device['IP']
+            if ip in open_ports_results:
+                print(f"\nOpen ports for {ip}:")
+                for port in open_ports_results[ip]:
+                    print(f"Port: {port}")
+            else:
+                print(f"\nNo open ports found for {ip}.")
+
+        # Save results
+        save_choice = input("Do you want to save the scan results to a CSV file? (y/n): ").strip().lower()
         if save_choice == 'y':
-            output_file = input("Enter the output filename (default is 'scan_results.csv'): ").strip() or 'scan_results.csv'
-            save_results_to_csv(devices, output_file)
+            output_file = input("Enter the name of the output CSV file (default is results.csv): ").strip() or 'results.csv'
+            save_results_to_csv(devices, open_ports_results, output_file)
 
 if __name__ == "__main__":
     main()
