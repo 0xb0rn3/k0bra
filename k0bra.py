@@ -1,101 +1,120 @@
-import subprocess
-import json
-import argparse
-import logging
-import os
-import platform
-from tabulate import tabulate
-import netifaces as ni
-import time
+import scapy.all as scapy
+import netifaces
+import sys
+import csv
+from typing import List, Dict
 
-# Set up logging
-logging.basicConfig(filename='k0bra.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+def print_header():
+    print("    ██   ██  ██████  ██████  ██████   █████  ")
+    print("    ██  ██  ██  ████ ██   ██ ██   ██ ██   ██ ")
+    print("    █████   ██ ██ ██ ██████  ██████  ███████ ")
+    print("    ██  ██  ████  ██ ██   ██ ██   ██ ██   ██ ")
+    print("    ██   ██  ██████  ██████  ██   ██ ██   ██ ")
+    print("Welcome to k0bra - The Network Scavenger! Developed by b0urn3.")
+    print("Other tools found at https://github.com/q4n0")
+    print("Email: b0urn3@proton.me Instagram: onlybyhive\n")
 
-def display_banner():
-    banner = """
-    ██   ██  ██████  ██████  ██████   █████  
-    ██  ██  ██  ████ ██   ██ ██   ██ ██   ██ 
-    █████   ██ ██ ██ ██████  ██████  ███████ 
-    ██  ██  ████  ██ ██   ██ ██   ██ ██   ██ 
-    ██   ██  ██████  ██████  ██   ██ ██   ██ 
-    """
-    print(banner)
-    print("Welcome to k0bra - The Network Scavenger! Developed by b0urn3.\nOther tools found at https://github.com/q4n0\nEmail: b0urn3@proton.me Instagram: onlybyhive")
+def get_active_interfaces() -> List[str]:
+    interfaces = netifaces.interfaces()
+    active_interfaces = []
+    for iface in interfaces:
+        iface_info = netifaces.ifaddresses(iface)
+        if netifaces.AF_INET in iface_info:
+            active_interfaces.append(iface)
+    return active_interfaces
 
-def get_interface() -> str:
-    interfaces = ni.interfaces()
-    current_iface = ni.gateways()['default'][ni.AF_INET][1]
-    print(f"\nCurrent connected interface: {current_iface}")
-    print("Other active network interfaces:")
-    for i, iface in enumerate(interfaces):
-        if iface == current_iface:
-            continue
-        print(f"  {i+1}. {iface}")
+def get_ip_range(interface: str) -> str:
+    iface_info = netifaces.ifaddresses(interface)
+    ip_info = iface_info[netifaces.AF_INET]
+    ip = ip_info[0]['addr']
+    subnet_mask = ip_info[0]['netmask']
+    
+    # Calculate the network address
+    ip_parts = ip.split('.')
+    mask_parts = subnet_mask.split('.')
+    network_address = '.'.join(str(int(ip_parts[i]) & int(mask_parts[i])) for i in range(4))
+    
+    return f"{network_address}/24"
 
-    choice = input("\nEnter the number of the network interface you want to use (default is the current interface): ")
-    if choice:
-        selected_iface = interfaces[int(choice)-1]
-    else:
-        selected_iface = current_iface
-    return selected_iface
+def get_gateway(interface: str) -> str:
+    """Retrieve the gateway for the chosen interface."""
+    gateways = netifaces.gateways()
+    if interface in gateways[netifaces.AF_INET]:
+        return gateways[netifaces.AF_INET][interface][0]
+    return None
 
-def run_go_scan(ip_range: str) -> list:
-    try:
-        result = subprocess.run(["./k0bra_go", ip_range], capture_output=True, text=True)
-        return json.loads(result.stdout)
-    except Exception as e:
-        logging.error(f"Error executing Go scan: {e}")
-        return []
+def get_ip_mac_pairs(ip_range: str) -> List[Dict[str, str]]:
+    arp_request = scapy.ARP(pdst=ip_range)
+    broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
+    arp_request_broadcast = broadcast / arp_request
+    answered_list = scapy.srp(arp_request_broadcast, timeout=2, verbose=False)[0]
+    
+    devices = []
+    for element in answered_list:
+        device_info = {"IP": element[1].psrc, "MAC": element[1].hwsrc}
+        devices.append(device_info)
+        print(f"Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}")  # Debug output
+    return devices
 
-def display_results(devices: list):
-    if devices:
-        table = tabulate(devices, headers="keys", tablefmt="fancy_grid")
-        print(table)
-    else:
-        print("No devices found on the network.")
+def save_results_to_csv(devices: List[Dict[str, str]], output_file: str):
+    """Save the found devices to a CSV file."""
+    with open(output_file, 'w', newline='') as csvfile:
+        fieldnames = ['IP', 'MAC']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
-def save_results(devices: list, filename: str):
-    try:
-        with open(filename, 'w') as f:
-            json.dump(devices, f, indent=4)
-        print(f"Results saved to {filename}")
-    except Exception as e:
-        logging.error(f"Error saving results: {e}")
+        writer.writeheader()
+        for device in devices:
+            writer.writerow(device)
 
-def clear_terminal():
-    os.system('cls' if platform.system() == 'Windows' else 'clear')
+    print(f"Results saved to {output_file}")
 
 def main():
-    display_banner()
+    print_header()
 
-    parser = argparse.ArgumentParser(description="k0bra - Network Scanner")
-    parser.add_argument("-s", "--save", action="store_true", help="Save results to a file")
-    parser.add_argument("--ip-filter", type=str, help="Filter devices by IP range prefix")
-    args = parser.parse_args()
+    active_interfaces = get_active_interfaces()
+    if not active_interfaces:
+        print("No active network interfaces found.")
+        sys.exit(1)
 
-    selected_iface = get_interface()
-    print(f"\nStarting scan on interface: {selected_iface}\n")
-    time.sleep(1)
-
-    ip_info = ni.ifaddresses(selected_iface).get(ni.AF_INET)
-    if not ip_info:
-        print("No IP address found for the selected interface.")
-        return
-
-    ips = ip_info[0]['addr']
-    ip_parts = ips.split('.')
-    ip_range = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.0/24"
+    current_interface = active_interfaces[0]
+    print(f"Current connected interface: {current_interface}")
     
-    print(f"\nScanning IP range: {ip_range}")
-    devices = run_go_scan(ip_range)
+    print("Other active network interfaces:")
+    for i, iface in enumerate(active_interfaces):
+        if iface != current_interface:
+            print(f"  {i + 1}. {iface}")
 
-    if args.ip_filter:
-        devices = [device for device in devices if device['IP'].startswith(args.ip_filter)]
-    
-    display_results(devices)
+    iface_choice = input(f"Enter the number of the network interface you want to use (default is {current_interface}): ")
+    if iface_choice.isdigit() and 0 < int(iface_choice) <= len(active_interfaces):
+        chosen_interface = active_interfaces[int(iface_choice) - 1]
+    else:
+        chosen_interface = current_interface
 
-    if args.save:
-        save_results(devices, 'scan_results.json')
+    # Get the gateway for the chosen interface
+    gateway = get_gateway(chosen_interface)
+    print(f"Gateway for interface {chosen_interface}: {gateway}")
+
+    # Customize IP range
+    ip_range = input("Enter the IP range to scan (default is calculated from your interface): ").strip()
+    if not ip_range:
+        ip_range = get_ip_range(chosen_interface)
+    print(f"\nStarting scan on interface: {chosen_interface}")
+    print(f"Scanning IP range: {ip_range}\n")
+
+    devices = get_ip_mac_pairs(ip_range)
+
+    if not devices:
+        print("No devices found on the network.")
+    else:
+        print("\nDevices found:")
+        for device in devices:
+            print(f"IP: {device['IP']}, MAC: {device['MAC']}")
+
+        # Prompt to save results
+        save_choice = input("Do you want to save the results to a CSV file? (y/n): ").strip().lower()
+        if save_choice == 'y':
+            output_file = input("Enter the output filename (default is 'scan_results.csv'): ").strip() or 'scan_results.csv'
+            save_results_to_csv(devices, output_file)
 
 if __name__ == "__main__":
     main()
