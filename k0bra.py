@@ -33,23 +33,29 @@ def get_active_interfaces() -> List[str]:
     interfaces = netifaces.interfaces()
     active_interfaces = []
     for iface in interfaces:
-        iface_info = netifaces.ifaddresses(iface)
-        if netifaces.AF_INET in iface_info:
-            active_interfaces.append(iface)
+        try:
+            iface_info = netifaces.ifaddresses(iface)
+            if netifaces.AF_INET in iface_info:
+                active_interfaces.append(iface)
+        except (ValueError, KeyError):
+            pass  # Skip interfaces with no valid IP configuration
     return active_interfaces
 
 def get_ip_range(interface: str) -> str:
-    iface_info = netifaces.ifaddresses(interface)
-    ip_info = iface_info[netifaces.AF_INET]
-    ip = ip_info[0]['addr']
-    subnet_mask = ip_info[0]['netmask']
-    
-    # Calculate the network address
-    ip_parts = ip.split('.')
-    mask_parts = subnet_mask.split('.')
-    network_address = '.'.join(str(int(ip_parts[i]) & int(mask_parts[i])) for i in range(4))
-    
-    return f"{network_address}/24"
+    try:
+        iface_info = netifaces.ifaddresses(interface)
+        ip_info = iface_info[netifaces.AF_INET]
+        ip = ip_info[0]['addr']
+        subnet_mask = ip_info[0]['netmask']
+        
+        # Calculate the network address
+        ip_parts = ip.split('.')
+        mask_parts = subnet_mask.split('.')
+        network_address = '.'.join(str(int(ip_parts[i]) & int(mask_parts[i])) for i in range(4))
+        return f"{network_address}/24"
+    except KeyError:
+        print(f"Could not retrieve IP information for interface: {interface}")
+        sys.exit(1)
 
 def get_gateway(interface: str) -> str:
     """Retrieve the gateway for the chosen interface."""
@@ -58,11 +64,11 @@ def get_gateway(interface: str) -> str:
         return gateways[netifaces.AF_INET][interface][0]
     return None
 
-def get_ip_mac_pairs(ip_range: str) -> List[Dict[str, str]]:
+def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
     arp_request = scapy.ARP(pdst=ip_range)
     broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
     arp_request_broadcast = broadcast / arp_request
-    answered_list = scapy.srp(arp_request_broadcast, timeout=2, verbose=False)[0]
+    answered_list = scapy.srp(arp_request_broadcast, timeout=timeout, verbose=False)[0]
     
     devices = []
     for element in answered_list:
@@ -71,22 +77,24 @@ def get_ip_mac_pairs(ip_range: str) -> List[Dict[str, str]]:
         print(f"Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}")  # Debug output
     return devices
 
-def masscan_scan(ip_range: str) -> Dict[str, List[int]]:
-    """Use Masscan to scan all ports on the specified IP range with stealth parameters."""
+def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) -> Dict[str, List[int]]:
+    """Use Masscan to scan ports with configurable parameters."""
     masscan_results = {}
     
     # Set stealth parameters
-    stealth_options = "--rate 50000"  # Stealth options for Masscan
+    stealth_options = f"--rate {rate}"  # Stealth options for Masscan
 
     # Run Masscan command
-    command = f"masscan {ip_range} -p0-65535 {stealth_options} --wait 2"
+    command = f"masscan {ip_range} -p{port_range} {stealth_options} --wait 2"
     try:
         result = subprocess.check_output(command, shell=True, text=True)
         for line in result.splitlines():
             if line.startswith('Discovered'):
                 parts = line.split()
-                ip = parts[3]  # Extract IP from the output
-                port = int(parts[5])  # Extract port from the output
+                # The correct format of masscan output is:
+                # 'Discovered open port <port>/<protocol> on <ip>'
+                port = int(parts[3].split('/')[0])  # Extract port from <port>/<protocol>
+                ip = parts[5]  # Extract IP address
                 if ip not in masscan_results:
                     masscan_results[ip] = []
                 masscan_results[ip].append(port)
@@ -94,12 +102,13 @@ def masscan_scan(ip_range: str) -> Dict[str, List[int]]:
         print(f"Masscan failed: {e}")
     return masscan_results
 
-def scan_all_ports(devices: List[Dict[str, str]]) -> Dict[str, List[int]]:
+
+def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", rate: int = 50000) -> Dict[str, List[int]]:
     """Scan open ports on all devices using Masscan."""
     results = {}
     ip_range = ','.join(device['IP'] for device in devices)
     print(f"Using Masscan to scan range: {ip_range}")
-    masscan_results = masscan_scan(ip_range)
+    masscan_results = masscan_scan(ip_range, port_range=port_range, rate=rate)
     
     for device in devices:
         ip = device['IP']
@@ -157,10 +166,14 @@ def main():
     ip_range = input("Enter the IP range to scan (default is calculated from your interface): ").strip()
     if not ip_range:
         ip_range = get_ip_range(chosen_interface)
-    print(f"\nStarting scan on interface: {chosen_interface}")
-    print(f"Scanning IP range: {ip_range}\n")
+    
+    timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
+    timeout = int(timeout) if timeout.isdigit() else 2
 
-    devices = get_ip_mac_pairs(ip_range)
+    print(f"\nStarting scan on interface: {chosen_interface}")
+    print(f"Scanning IP range: {ip_range} with a timeout of {timeout} seconds.\n")
+
+    devices = get_ip_mac_pairs(ip_range, timeout=timeout)
 
     if not devices:
         print("No devices found on the network.")
@@ -169,23 +182,19 @@ def main():
         for device in devices:
             print(f"IP: {device['IP']}, MAC: {device['MAC']}")
 
-        print("Scanning for open ports on all discovered devices using Masscan...")
-        open_ports_results = scan_all_ports(devices)
+        port_range = input("Enter port range to scan (default is 0-65535): ").strip() or "0-65535"
+        rate = input("Enter scan rate for Masscan (default is 50000): ").strip()
+        rate = int(rate) if rate.isdigit() else 50000
 
-        for device in devices:
-            ip = device['IP']
-            if ip in open_ports_results:
-                print(f"\nOpen ports for {ip}:")
-                for port in open_ports_results[ip]:
-                    print(f"Port: {port}")
-            else:
-                print(f"\nNo open ports found for {ip}.")
+        open_ports = scan_all_ports(devices, port_range=port_range, rate=rate)
 
-        # Save results
-        save_choice = input("Do you want to save the scan results to a CSV file? (y/n): ").strip().lower()
-        if save_choice == 'y':
-            output_file = input("Enter the name of the output CSV file (default is results.csv): ").strip() or 'results.csv'
-            save_results_to_csv(devices, open_ports_results, output_file)
+        for ip, ports in open_ports.items():
+            print(f"IP: {ip}, Open Ports: {ports}")
+        
+        save_option = input("Do you want to save the results to a CSV file? (y/n): ").strip().lower()
+        if save_option == 'y':
+            output_file = input("Enter the output CSV file name (default is 'scan_results.csv'): ").strip() or "scan_results.csv"
+            save_results_to_csv(devices, open_ports, output_file)
 
 if __name__ == "__main__":
     main()
