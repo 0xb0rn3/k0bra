@@ -13,9 +13,9 @@ def print_header():
     print("    █████   ██ ██ ██ ██████  ██████  ███████ ")
     print("    ██  ██  ████  ██ ██   ██ ██   ██ ██   ██ ")
     print("    ██   ██  ██████  ██████  ██   ██ ██   ██ ")
-    print("Welcome to k0bra - The Network Scavenger! Developed by b0urn3.")
+    print("Welcome to k0bra - The Net Scavenger! Developed by b0urn3.")
     print("Other tools found at https://github.com/q4n0")
-    print("Email: b0urn3@proton.me Instagram: onlybyhive\n")
+    print("Email: b0urn3@proton.me | Instagram: onlybyhive\n")
 
 def is_masscan_installed() -> bool:
     """Check if Masscan is installed."""
