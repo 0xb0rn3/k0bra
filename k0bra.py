@@ -88,7 +88,9 @@ def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
         device_info = {"IP": element[1].psrc, "MAC": element[1].hwsrc}
         devices.append(device_info)
         mac_info = get_mac_info(device_info['MAC'])  # Fetch MAC info
-        print(f"{GREEN}Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}, Vendor: {mac_info.get('vendor', 'Unknown')}{RESET}")
+        vendor = mac_info.get('vendorDetails', {}).get('companyName', 'Unknown')
+        print(f"{GREEN}Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}, Vendor: {vendor}{RESET}")
+        time.sleep(1)  # Delay to avoid hitting API rate limits
     return devices
 
 def get_mac_info(mac_address: str) -> dict:
@@ -145,13 +147,6 @@ def save_results_to_csv(devices: List[Dict[str, str]], open_ports: Dict[str, Lis
 
     print(GREEN + f"Results saved to {output_file}" + RESET)
 
-def progress_bar(completion, total, bar_length=50):
-    progress = int((completion / total) * bar_length)
-    bar = "[" + "#" * progress + "-" * (bar_length - progress) + "]"
-    percent = (completion / total) * 100
-    sys.stdout.write(f"\rProgress: {bar} {percent:.2f}%")
-    sys.stdout.flush()
-
 def main():
     # Handle Ctrl+C for clean exit
     signal.signal(signal.SIGINT, handle_exit)
@@ -177,10 +172,9 @@ def main():
             print(f"  {i + 1}. {iface}")
 
     iface_choice = input(f"Enter the number of the network interface you want to use (default is {current_interface}): ")
+    chosen_interface = current_interface
     if iface_choice.isdigit() and 0 < int(iface_choice) <= len(active_interfaces):
         chosen_interface = active_interfaces[int(iface_choice) - 1]
-    else:
-        chosen_interface = current_interface
 
     gateway = get_gateway(chosen_interface)
     print(f"{CYAN}Gateway for interface {chosen_interface}: {gateway}{RESET}")
@@ -202,10 +196,8 @@ def main():
 
     save_results = input("Do you want to save the results to a CSV file? (y/n): ").strip().lower()
     if save_results == 'y':
-        output_file = input("Enter the name of the output CSV file: ").strip()
+        output_file = input("Enter output CSV filename (default is 'scan_results.csv'): ") or 'scan_results.csv'
         save_results_to_csv(devices, open_ports, output_file)
-
-    print(GREEN + "Scan complete!" + RESET)
 
 if __name__ == "__main__":
     main()
