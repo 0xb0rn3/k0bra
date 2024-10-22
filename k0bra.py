@@ -7,6 +7,7 @@ import subprocess
 import os
 import signal
 import time
+import requests
 from typing import List, Dict
 
 # ANSI color codes
@@ -86,8 +87,20 @@ def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
     for element in answered_list:
         device_info = {"IP": element[1].psrc, "MAC": element[1].hwsrc}
         devices.append(device_info)
-        print(f"{GREEN}Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}{RESET}")
+        mac_info = get_mac_info(device_info['MAC'])  # Fetch MAC info
+        print(f"{GREEN}Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}, Vendor: {mac_info.get('vendor', 'Unknown')}{RESET}")
     return devices
+
+def get_mac_info(mac_address: str) -> dict:
+    api_key = "at_tGZehHvHM0WgIARGwkwiwlo2Tiwlm"  # Replace with your actual API key
+    url = f"https://api.macaddress.io/v1?apiKey={api_key}&output=json&search={mac_address}"
+    response = requests.get(url)
+    
+    if response.status_code == 200:
+        return response.json()  # Parses the JSON response
+    else:
+        print(f"Failed to fetch MAC info for {mac_address}. Error code: {response.status_code}")
+        return {}
 
 def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) -> Dict[str, List[int]]:
     masscan_results = {}
@@ -182,20 +195,14 @@ def main():
     devices = get_ip_mac_pairs(ip_range, timeout=timeout)
 
     if not devices:
-        print(RED + "No devices found on the network." + RESET)
-        sys.exit(1)
+        print(RED + "No devices found." + RESET)
+        return
 
-    scan_ports = input("Do you want to scan for open ports? (y/n): ").lower().strip() == 'y'
-    open_ports = {}
-    if scan_ports:
-        port_range = input("Enter the port range to scan (default is 0-65535): ").strip() or "0-65535"
-        rate = input("Enter the scan rate for Masscan (default is 50000): ").strip() or "50000"
-        
-        open_ports = scan_all_ports(devices, port_range=port_range, rate=int(rate))
+    open_ports = scan_all_ports(devices)
 
-    save_results = input("Do you want to save results to CSV? (y/n): ").lower().strip() == 'y'
-    if save_results:
-        output_file = input("Enter the output CSV file path (default is scan_results.csv): ").strip() or "scan_results.csv"
+    save_results = input("Do you want to save the results to a CSV file? (y/n): ").strip().lower()
+    if save_results == 'y':
+        output_file = input("Enter the name of the output CSV file: ").strip()
         save_results_to_csv(devices, open_ports, output_file)
 
     print(GREEN + "Scan complete!" + RESET)
