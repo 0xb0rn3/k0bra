@@ -6,6 +6,7 @@ import csv
 import subprocess
 import os
 import signal
+import time
 from typing import List, Dict
 
 # ANSI color codes
@@ -131,6 +132,13 @@ def save_results_to_csv(devices: List[Dict[str, str]], open_ports: Dict[str, Lis
 
     print(GREEN + f"Results saved to {output_file}" + RESET)
 
+def progress_bar(completion, total, bar_length=50):
+    progress = int((completion / total) * bar_length)
+    bar = "[" + "#" * progress + "-" * (bar_length - progress) + "]"
+    percent = (completion / total) * 100
+    sys.stdout.write(f"\rProgress: {bar} {percent:.2f}%")
+    sys.stdout.flush()
+
 def main():
     # Handle Ctrl+C for clean exit
     signal.signal(signal.SIGINT, handle_exit)
@@ -171,30 +179,26 @@ def main():
     timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
     timeout = int(timeout) if timeout.isdigit() else 2
 
-    print(f"{BLUE}\nStarting scan on interface: {chosen_interface}")
-    print(f"Scanning IP range: {ip_range} with a timeout of {timeout} seconds.{RESET}\n")
-
     devices = get_ip_mac_pairs(ip_range, timeout=timeout)
 
     if not devices:
         print(RED + "No devices found on the network." + RESET)
-    else:
-        print(GREEN + "\nDevices found:" + RESET)
-        for device in devices:
-            print(f"IP: {device['IP']}, MAC: {device['MAC']}")
+        sys.exit(1)
 
-        port_range = input("Enter port range to scan (default is 0-65535): ").strip() or "0-65535"
-        rate = input("Enter scan rate for Masscan (default is 50000): ").strip()
-        rate = int(rate) if rate.isdigit() else 50000
+    scan_ports = input("Do you want to scan for open ports? (y/n): ").lower().strip() == 'y'
+    open_ports = {}
+    if scan_ports:
+        port_range = input("Enter the port range to scan (default is 0-65535): ").strip() or "0-65535"
+        rate = input("Enter the scan rate for Masscan (default is 50000): ").strip() or "50000"
+        
+        open_ports = scan_all_ports(devices, port_range=port_range, rate=int(rate))
 
-        open_ports = scan_all_ports(devices, port_range=port_range, rate=rate)
+    save_results = input("Do you want to save results to CSV? (y/n): ").lower().strip() == 'y'
+    if save_results:
+        output_file = input("Enter the output CSV file path (default is scan_results.csv): ").strip() or "scan_results.csv"
+        save_results_to_csv(devices, open_ports, output_file)
 
-        for ip, ports in open_ports.items():
-            print(f"{GREEN}IP: {ip}, Open Ports: {', '.join(map(str, ports))}{RESET}")
-
-        if input("Do you want to save the results to a CSV file? (y/n): ").strip().lower() == 'y':
-            output_file = input("Enter the output CSV file path (default: scan_results.csv): ").strip() or 'scan_results.csv'
-            save_results_to_csv(devices, open_ports, output_file)
+    print(GREEN + "Scan complete!" + RESET)
 
 if __name__ == "__main__":
     main()
