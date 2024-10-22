@@ -8,7 +8,14 @@ import os
 import signal
 import time
 import requests
+import re
+import logging
+import asyncio
+import aiohttp
 from typing import List, Dict
+
+# Set up logging configuration
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ANSI color codes
 RED = "\033[91m"
@@ -77,6 +84,11 @@ def get_gateway(interface: str) -> str:
         return gateways[netifaces.AF_INET][interface][0]
     return None
 
+def validate_ip(ip: str) -> bool:
+    """Validate the format of an IP address."""
+    pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}(/\d{1,2})?$"
+    return re.match(pattern, ip) is not None
+
 def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
     arp_request = scapy.ARP(pdst=ip_range)
     broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
@@ -87,22 +99,28 @@ def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
     for element in answered_list:
         device_info = {"IP": element[1].psrc, "MAC": element[1].hwsrc}
         devices.append(device_info)
-        mac_info = get_mac_info(device_info['MAC'])  # Fetch MAC info
+        mac_info = asyncio.run(get_mac_info(device_info['MAC']))  # Fetch MAC info asynchronously
         vendor = mac_info.get('vendorDetails', {}).get('companyName', 'Unknown')
         print(f"{GREEN}Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}, Vendor: {vendor}{RESET}")
         time.sleep(1)  # Delay to avoid hitting API rate limits
     return devices
 
-def get_mac_info(mac_address: str) -> dict:
-    api_key = "at_tGZehHvHM0WgIARGwkwiwlo2Tiwlm"  # Replace with your actual API key
+async def fetch_mac_info(mac_address: str, session: aiohttp.ClientSession) -> dict:
+    """Asynchronously fetch MAC address info from the API."""
+    api_key = os.getenv("MAC_API_KEY")  # Use environment variable for the API key
     url = f"https://api.macaddress.io/v1?apiKey={api_key}&output=json&search={mac_address}"
-    response = requests.get(url)
     
-    if response.status_code == 200:
-        return response.json()  # Parses the JSON response
-    else:
-        print(f"Failed to fetch MAC info for {mac_address}. Error code: {response.status_code}")
-        return {}
+    async with session.get(url) as response:
+        if response.status == 200:
+            return await response.json()  # Parses the JSON response
+        else:
+            logging.error(f"Failed to fetch MAC info for {mac_address}. Error code: {response.status}")
+            return {}
+
+async def get_mac_info(mac_address: str) -> dict:
+    """Wrapper function to fetch MAC info with aiohttp."""
+    async with aiohttp.ClientSession() as session:
+        return await fetch_mac_info(mac_address, session)
 
 def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) -> Dict[str, List[int]]:
     masscan_results = {}
@@ -182,21 +200,22 @@ def main():
     ip_range = input(f"Enter the IP range to scan (default is calculated from your interface): ").strip()
     if not ip_range:
         ip_range = get_ip_range(chosen_interface)
-    
+
+    if not validate_ip(ip_range):
+        print(RED + "Invalid IP range format." + RESET)
+        return
+
     timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
-    timeout = int(timeout) if timeout.isdigit() else 2
+    timeout = int(timeout) if timeout.isdigit() and int(timeout) > 0 else 2
 
     devices = get_ip_mac_pairs(ip_range, timeout=timeout)
 
-    if not devices:
-        print(RED + "No devices found." + RESET)
-        return
-
     open_ports = scan_all_ports(devices)
 
-    save_results = input("Do you want to save the results to a CSV file? (y/n): ").strip().lower()
-    if save_results == 'y':
-        output_file = input("Enter output CSV filename (default is 'scan_results.csv'): ") or 'scan_results.csv'
+    save_choice = input(f"Do you want to save the results to a CSV file? (y/n): ").strip().lower()
+    if save_choice == 'y':
+        output_file = input("Enter the output file name (default is results.csv): ").strip()
+        output_file = output_file if output_file else "results.csv"
         save_results_to_csv(devices, open_ports, output_file)
 
 if __name__ == "__main__":
