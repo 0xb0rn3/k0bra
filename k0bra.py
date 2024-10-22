@@ -7,6 +7,7 @@ import subprocess
 import os
 import signal
 import time
+import requests
 from typing import List, Dict
 
 # ANSI color codes
@@ -42,17 +43,6 @@ def is_masscan_installed() -> bool:
 def install_masscan():
     print(YELLOW + "Masscan not found. Installing in the background..." + RESET)
     os.system("sudo apt-get install -y masscan &")
-
-def is_nmap_installed() -> bool:
-    try:
-        subprocess.run(["nmap", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return True
-    except FileNotFoundError:
-        return False
-
-def install_nmap():
-    print(YELLOW + "Nmap not found. Installing in the background..." + RESET)
-    os.system("sudo apt-get install -y nmap &")
 
 def get_active_interfaces() -> List[str]:
     interfaces = netifaces.interfaces()
@@ -101,10 +91,11 @@ def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
         time.sleep(1)  # Delay to avoid hitting API rate limits
     return devices
 
-def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) -> Dict[str, List[int]]:
+def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 1000) -> Dict[str, List[int]]:
     masscan_results = {}
-    stealth_options = f"--rate {rate}"  # Stealth options for Masscan
-    command = f"masscan {ip_range} -p{port_range} {stealth_options} --wait 2"
+    stealth_options = f"--rate {rate} --wait 1 --ping --max-retries 2 --timeout 1s"
+    command = f"masscan {ip_range} -p{port_range} {stealth_options}"
+    
     try:
         result = subprocess.check_output(command, shell=True, text=True)
         for line in result.splitlines():
@@ -117,42 +108,19 @@ def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) 
                 masscan_results[ip].append(port)
     except subprocess.CalledProcessError as e:
         print(RED + f"Masscan failed: {e}" + RESET)
+    
     return masscan_results
 
-def nmap_scan(ip_range: str, port_range: str = "1-65535") -> Dict[str, List[int]]:
-    nmap_results = {}
-    command = f"nmap -p {port_range} {ip_range} -oG -"
-    try:
-        result = subprocess.check_output(command, shell=True, text=True)
-        for line in result.splitlines():
-            if '/tcp' in line:
-                parts = line.split()
-                port = int(parts[1])
-                ip = parts[0]
-                if ip not in nmap_results:
-                    nmap_results[ip] = []
-                nmap_results[ip].append(port)
-    except subprocess.CalledProcessError as e:
-        print(RED + f"Nmap failed: {e}" + RESET)
-    return nmap_results
-
-def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", scanning_tool: str = "masscan") -> Dict[str, List[int]]:
+def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", rate: int = 1000) -> Dict[str, List[int]]:
     results = {}
-    ip_range = ' '.join(device['IP'] for device in devices)  # Space-separated IPs for Nmap
-    print(BLUE + f"Scanning using {scanning_tool.upper()} on range: {ip_range}" + RESET)
-
-    if scanning_tool == "masscan":
-        masscan_results = masscan_scan(ip_range, port_range)
-        for device in devices:
-            ip = device['IP']
-            if ip in masscan_results:
-                results[ip] = masscan_results[ip]
-    elif scanning_tool == "nmap":
-        nmap_results = nmap_scan(ip_range, port_range)
-        for device in devices:
-            ip = device['IP']
-            if ip in nmap_results:
-                results[ip] = nmap_results[ip]
+    ip_range = ','.join(device['IP'] for device in devices)
+    print(BLUE + f"Scanning using Masscan on range: {ip_range}" + RESET)
+    masscan_results = masscan_scan(ip_range, port_range=port_range, rate=rate)
+    
+    for device in devices:
+        ip = device['IP']
+        if ip in masscan_results:
+            results[ip] = masscan_results[ip]
     return results
 
 def save_results_to_csv(devices: List[Dict[str, str]], open_ports: Dict[str, List[int]], output_file: str):
@@ -169,42 +137,67 @@ def save_results_to_csv(devices: List[Dict[str, str]], open_ports: Dict[str, Lis
     print(GREEN + f"Results saved to {output_file}" + RESET)
 
 def main():
-    print_header()
+    # Handle Ctrl+C for clean exit
     signal.signal(signal.SIGINT, handle_exit)
+
+    print_header()
 
     if not is_masscan_installed():
         install_masscan()
-    if not is_nmap_installed():
-        install_nmap()
+        print(YELLOW + "Please run the script again after Masscan installation." + RESET)
+        sys.exit(1)
 
     active_interfaces = get_active_interfaces()
-    print(YELLOW + "Available interfaces:" + RESET)
-    for idx, interface in enumerate(active_interfaces):
-        print(f"{idx}: {interface}")
+    if not active_interfaces:
+        print(RED + "No active network interfaces found." + RESET)
+        sys.exit(1)
 
-    chosen_interface_index = input(f"Enter the number of the network interface you want to use (default is {active_interfaces[0]}): ")
-    chosen_interface = active_interfaces[int(chosen_interface_index) if chosen_interface_index.isdigit() else 0]
+    current_interface = active_interfaces[0]
+    print(f"{GREEN}Current connected interface: {current_interface}{RESET}")
+    
+    print("Other active network interfaces:")
+    for i, iface in enumerate(active_interfaces):
+        if iface != current_interface:
+            print(f"  {i + 1}. {iface}")
+
+    iface_choice = input(f"Enter the number of the network interface you want to use (default is {current_interface}): ")
+    chosen_interface = current_interface
+    if iface_choice.isdigit() and 0 < int(iface_choice) <= len(active_interfaces):
+        chosen_interface = active_interfaces[int(iface_choice) - 1]
 
     gateway = get_gateway(chosen_interface)
-    print(f"Gateway for interface {chosen_interface}: {gateway if gateway else 'None'}")
+    print(f"{CYAN}Gateway for interface {chosen_interface}: {gateway}{RESET}")
 
-    ip_range = input("Enter the IP range to scan (default is calculated from your interface): ")
+    ip_range = input(f"Enter the IP range to scan (default is calculated from your interface): ").strip()
     if not ip_range:
         ip_range = get_ip_range(chosen_interface)
-        print(f"{GREEN}Using default IP range: {ip_range}{RESET}")
+    
+    timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
+    timeout = int(timeout) if timeout.isdigit() else 2
 
-    devices = get_ip_mac_pairs(ip_range)
+    devices = get_ip_mac_pairs(ip_range, timeout=timeout)
 
-    scanning_tool = input(f"Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ")
-    if scanning_tool == '2':
-        scanning_tool = "nmap"
-    else:
-        scanning_tool = "masscan"
+    if not devices:
+        print(RED + "No devices found." + RESET)
+        return
 
-    open_ports = scan_all_ports(devices, port_range="0-65535", scanning_tool=scanning_tool)
+    # Choose scanning tool
+    scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
+    if scan_tool not in ['1', '2']:
+        scan_tool = '1'  # Default to Masscan
 
-    output_file = input("Enter output CSV file name (default is results.csv): ").strip() or "results.csv"
-    save_results_to_csv(devices, open_ports, output_file)
+    open_ports = {}
+    
+    if scan_tool == '1':
+        open_ports = scan_all_ports(devices)
+    elif scan_tool == '2':
+        print(BLUE + f"Scanning using Nmap on range: {ip_range}" + RESET)
+        # Add Nmap scanning logic here if desired
+
+    save_results = input("Do you want to save the results to a CSV file? (y/n): ").strip().lower()
+    if save_results == 'y':
+        output_file = input("Enter output CSV filename (default is 'results.csv'): ") or 'results.csv'
+        save_results_to_csv(devices, open_ports, output_file)
 
 if __name__ == "__main__":
     main()
