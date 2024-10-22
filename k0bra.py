@@ -7,15 +7,7 @@ import subprocess
 import os
 import signal
 import time
-import requests
-import re
-import logging
-import asyncio
-import aiohttp
 from typing import List, Dict
-
-# Set up logging configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ANSI color codes
 RED = "\033[91m"
@@ -51,6 +43,17 @@ def install_masscan():
     print(YELLOW + "Masscan not found. Installing in the background..." + RESET)
     os.system("sudo apt-get install -y masscan &")
 
+def is_nmap_installed() -> bool:
+    try:
+        subprocess.run(["nmap", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True
+    except FileNotFoundError:
+        return False
+
+def install_nmap():
+    print(YELLOW + "Nmap not found. Installing in the background..." + RESET)
+    os.system("sudo apt-get install -y nmap &")
+
 def get_active_interfaces() -> List[str]:
     interfaces = netifaces.interfaces()
     active_interfaces = []
@@ -84,11 +87,6 @@ def get_gateway(interface: str) -> str:
         return gateways[netifaces.AF_INET][interface][0]
     return None
 
-def validate_ip(ip: str) -> bool:
-    """Validate the format of an IP address."""
-    pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}(/\d{1,2})?$"
-    return re.match(pattern, ip) is not None
-
 def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
     arp_request = scapy.ARP(pdst=ip_range)
     broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
@@ -99,28 +97,9 @@ def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
     for element in answered_list:
         device_info = {"IP": element[1].psrc, "MAC": element[1].hwsrc}
         devices.append(device_info)
-        mac_info = asyncio.run(get_mac_info(device_info['MAC']))  # Fetch MAC info asynchronously
-        vendor = mac_info.get('vendorDetails', {}).get('companyName', 'Unknown')
-        print(f"{GREEN}Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}, Vendor: {vendor}{RESET}")
+        print(f"{GREEN}Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}{RESET}")
         time.sleep(1)  # Delay to avoid hitting API rate limits
     return devices
-
-async def fetch_mac_info(mac_address: str, session: aiohttp.ClientSession) -> dict:
-    """Asynchronously fetch MAC address info from the API."""
-    api_key = os.getenv("MAC_API_KEY")  # Use environment variable for the API key
-    url = f"https://api.macaddress.io/v1?apiKey={api_key}&output=json&search={mac_address}"
-    
-    async with session.get(url) as response:
-        if response.status == 200:
-            return await response.json()  # Parses the JSON response
-        else:
-            logging.error(f"Failed to fetch MAC info for {mac_address}. Error code: {response.status}")
-            return {}
-
-async def get_mac_info(mac_address: str) -> dict:
-    """Wrapper function to fetch MAC info with aiohttp."""
-    async with aiohttp.ClientSession() as session:
-        return await fetch_mac_info(mac_address, session)
 
 def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) -> Dict[str, List[int]]:
     masscan_results = {}
@@ -140,16 +119,40 @@ def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) 
         print(RED + f"Masscan failed: {e}" + RESET)
     return masscan_results
 
-def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", rate: int = 50000) -> Dict[str, List[int]]:
+def nmap_scan(ip_range: str, port_range: str = "1-65535") -> Dict[str, List[int]]:
+    nmap_results = {}
+    command = f"nmap -p {port_range} {ip_range} -oG -"
+    try:
+        result = subprocess.check_output(command, shell=True, text=True)
+        for line in result.splitlines():
+            if '/tcp' in line:
+                parts = line.split()
+                port = int(parts[1])
+                ip = parts[0]
+                if ip not in nmap_results:
+                    nmap_results[ip] = []
+                nmap_results[ip].append(port)
+    except subprocess.CalledProcessError as e:
+        print(RED + f"Nmap failed: {e}" + RESET)
+    return nmap_results
+
+def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", scanning_tool: str = "masscan") -> Dict[str, List[int]]:
     results = {}
     ip_range = ','.join(device['IP'] for device in devices)
-    print(BLUE + f"Using Masscan to scan range: {ip_range}" + RESET)
-    masscan_results = masscan_scan(ip_range, port_range=port_range, rate=rate)
-    
-    for device in devices:
-        ip = device['IP']
-        if ip in masscan_results:
-            results[ip] = masscan_results[ip]
+    print(BLUE + f"Scanning using {scanning_tool.upper()} on range: {ip_range}" + RESET)
+
+    if scanning_tool == "masscan":
+        masscan_results = masscan_scan(ip_range, port_range)
+        for device in devices:
+            ip = device['IP']
+            if ip in masscan_results:
+                results[ip] = masscan_results[ip]
+    elif scanning_tool == "nmap":
+        nmap_results = nmap_scan(ip_range, port_range)
+        for device in devices:
+            ip = device['IP']
+            if ip in nmap_results:
+                results[ip] = nmap_results[ip]
     return results
 
 def save_results_to_csv(devices: List[Dict[str, str]], open_ports: Dict[str, List[int]], output_file: str):
@@ -176,6 +179,11 @@ def main():
         print(YELLOW + "Please run the script again after Masscan installation." + RESET)
         sys.exit(1)
 
+    if not is_nmap_installed():
+        install_nmap()
+        print(YELLOW + "Please run the script again after Nmap installation." + RESET)
+        sys.exit(1)
+
     active_interfaces = get_active_interfaces()
     if not active_interfaces:
         print(RED + "No active network interfaces found." + RESET)
@@ -183,11 +191,6 @@ def main():
 
     current_interface = active_interfaces[0]
     print(f"{GREEN}Current connected interface: {current_interface}{RESET}")
-    
-    print("Other active network interfaces:")
-    for i, iface in enumerate(active_interfaces):
-        if iface != current_interface:
-            print(f"  {i + 1}. {iface}")
 
     iface_choice = input(f"Enter the number of the network interface you want to use (default is {current_interface}): ")
     chosen_interface = current_interface
@@ -200,23 +203,20 @@ def main():
     ip_range = input(f"Enter the IP range to scan (default is calculated from your interface): ").strip()
     if not ip_range:
         ip_range = get_ip_range(chosen_interface)
+        print(f"{GREEN}Using default IP range: {ip_range}{RESET}")
 
-    if not validate_ip(ip_range):
-        print(RED + "Invalid IP range format." + RESET)
-        return
+    devices = get_ip_mac_pairs(ip_range)
 
-    timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
-    timeout = int(timeout) if timeout.isdigit() and int(timeout) > 0 else 2
+    scanning_tool = input(f"Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ")
+    if scanning_tool == '2':
+        scanning_tool = "nmap"
+    else:
+        scanning_tool = "masscan"
 
-    devices = get_ip_mac_pairs(ip_range, timeout=timeout)
+    open_ports = scan_all_ports(devices, scanning_tool=scanning_tool)
 
-    open_ports = scan_all_ports(devices)
-
-    save_choice = input(f"Do you want to save the results to a CSV file? (y/n): ").strip().lower()
-    if save_choice == 'y':
-        output_file = input("Enter the output file name (default is results.csv): ").strip()
-        output_file = output_file if output_file else "results.csv"
-        save_results_to_csv(devices, open_ports, output_file)
+    output_file = input("Enter output CSV file name (default is results.csv): ").strip() or "results.csv"
+    save_results_to_csv(devices, open_ports, output_file)
 
 if __name__ == "__main__":
     main()
