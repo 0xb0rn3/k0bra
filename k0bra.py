@@ -9,6 +9,7 @@ import signal
 import time
 import requests
 from typing import List, Dict
+import nmap  # Import the Nmap module
 
 # ANSI color codes
 RED = "\033[91m"
@@ -91,11 +92,10 @@ def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
         time.sleep(1)  # Delay to avoid hitting API rate limits
     return devices
 
-def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 1000) -> Dict[str, List[int]]:
+def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) -> Dict[str, List[int]]:
     masscan_results = {}
-    stealth_options = f"--rate {rate} --wait 1 --ping --max-retries 2 --timeout 1s"
-    command = f"masscan {ip_range} -p{port_range} {stealth_options}"
-    
+    stealth_options = f"--rate {rate}"  # Stealth options for Masscan
+    command = f"masscan {ip_range} -p{port_range} {stealth_options} --wait 2"
     try:
         result = subprocess.check_output(command, shell=True, text=True)
         for line in result.splitlines():
@@ -108,19 +108,41 @@ def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 1000) -
                 masscan_results[ip].append(port)
     except subprocess.CalledProcessError as e:
         print(RED + f"Masscan failed: {e}" + RESET)
-    
     return masscan_results
 
-def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", rate: int = 1000) -> Dict[str, List[int]]:
+def nmap_scan(ip_range: str, port_range: str = "1-65535") -> Dict[str, List[int]]:
+    nm = nmap.PortScanner()
+    print(BLUE + f"Scanning using Nmap on range: {ip_range}" + RESET)
+    
+    try:
+        nm.scan(hosts=ip_range, arguments=f'-p {port_range} -sS -T4')  # SYN scan, faster timing
+    except Exception as e:
+        print(RED + f"Nmap scan failed: {e}" + RESET)
+        return {}
+
+    nmap_results = {}
+    for host in nm.all_hosts():
+        if 'tcp' in nm[host]:
+            open_ports = [port for port in nm[host]['tcp'] if nm[host]['tcp'][port]['state'] == 'open']
+            nmap_results[host] = open_ports
+            print(f"{GREEN}Found open ports on {host}: {open_ports}{RESET}")
+    
+    return nmap_results
+
+def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", scan_tool: str = "masscan") -> Dict[str, List[int]]:
     results = {}
     ip_range = ','.join(device['IP'] for device in devices)
-    print(BLUE + f"Scanning using Masscan on range: {ip_range}" + RESET)
-    masscan_results = masscan_scan(ip_range, port_range=port_range, rate=rate)
-    
-    for device in devices:
-        ip = device['IP']
-        if ip in masscan_results:
-            results[ip] = masscan_results[ip]
+    if scan_tool == "masscan":
+        print(BLUE + f"Using Masscan to scan range: {ip_range}" + RESET)
+        masscan_results = masscan_scan(ip_range, port_range=port_range)
+        
+        for device in devices:
+            ip = device['IP']
+            if ip in masscan_results:
+                results[ip] = masscan_results[ip]
+    elif scan_tool == "nmap":
+        results = nmap_scan(ip_range, port_range)
+
     return results
 
 def save_results_to_csv(devices: List[Dict[str, str]], open_ports: Dict[str, List[int]], output_file: str):
@@ -181,23 +203,17 @@ def main():
         print(RED + "No devices found." + RESET)
         return
 
-    # Choose scanning tool
     scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
-    if scan_tool not in ['1', '2']:
-        scan_tool = '1'  # Default to Masscan
-
-    open_ports = {}
-    
-    if scan_tool == '1':
-        open_ports = scan_all_ports(devices)
+    if not scan_tool or scan_tool == '1':
+        open_ports = scan_all_ports(devices, scan_tool='masscan')
     elif scan_tool == '2':
-        print(BLUE + f"Scanning using Nmap on range: {ip_range}" + RESET)
-        # Add Nmap scanning logic here if desired
+        open_ports = scan_all_ports(devices, scan_tool='nmap')
+    
+    output_file = input("Enter output CSV file name (default is results.csv): ").strip()
+    if not output_file:
+        output_file = 'results.csv'
 
-    save_results = input("Do you want to save the results to a CSV file? (y/n): ").strip().lower()
-    if save_results == 'y':
-        output_file = input("Enter output CSV filename (default is 'results.csv'): ") or 'results.csv'
-        save_results_to_csv(devices, open_ports, output_file)
+    save_results_to_csv(devices, open_ports, output_file)
 
 if __name__ == "__main__":
     main()
