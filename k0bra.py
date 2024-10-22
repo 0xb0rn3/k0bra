@@ -138,7 +138,7 @@ def nmap_scan(ip_range: str, port_range: str = "1-65535") -> Dict[str, List[int]
 
 def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", scanning_tool: str = "masscan") -> Dict[str, List[int]]:
     results = {}
-    ip_range = ','.join(device['IP'] for device in devices)
+    ip_range = ' '.join(device['IP'] for device in devices)  # Space-separated IPs for Nmap
     print(BLUE + f"Scanning using {scanning_tool.upper()} on range: {ip_range}" + RESET)
 
     if scanning_tool == "masscan":
@@ -169,38 +169,26 @@ def save_results_to_csv(devices: List[Dict[str, str]], open_ports: Dict[str, Lis
     print(GREEN + f"Results saved to {output_file}" + RESET)
 
 def main():
-    # Handle Ctrl+C for clean exit
-    signal.signal(signal.SIGINT, handle_exit)
-
     print_header()
+    signal.signal(signal.SIGINT, handle_exit)
 
     if not is_masscan_installed():
         install_masscan()
-        print(YELLOW + "Please run the script again after Masscan installation." + RESET)
-        sys.exit(1)
-
     if not is_nmap_installed():
         install_nmap()
-        print(YELLOW + "Please run the script again after Nmap installation." + RESET)
-        sys.exit(1)
 
     active_interfaces = get_active_interfaces()
-    if not active_interfaces:
-        print(RED + "No active network interfaces found." + RESET)
-        sys.exit(1)
+    print(YELLOW + "Available interfaces:" + RESET)
+    for idx, interface in enumerate(active_interfaces):
+        print(f"{idx}: {interface}")
 
-    current_interface = active_interfaces[0]
-    print(f"{GREEN}Current connected interface: {current_interface}{RESET}")
-
-    iface_choice = input(f"Enter the number of the network interface you want to use (default is {current_interface}): ")
-    chosen_interface = current_interface
-    if iface_choice.isdigit() and 0 < int(iface_choice) <= len(active_interfaces):
-        chosen_interface = active_interfaces[int(iface_choice) - 1]
+    chosen_interface_index = input(f"Enter the number of the network interface you want to use (default is {active_interfaces[0]}): ")
+    chosen_interface = active_interfaces[int(chosen_interface_index) if chosen_interface_index.isdigit() else 0]
 
     gateway = get_gateway(chosen_interface)
-    print(f"{CYAN}Gateway for interface {chosen_interface}: {gateway}{RESET}")
+    print(f"Gateway for interface {chosen_interface}: {gateway if gateway else 'None'}")
 
-    ip_range = input(f"Enter the IP range to scan (default is calculated from your interface): ").strip()
+    ip_range = input("Enter the IP range to scan (default is calculated from your interface): ")
     if not ip_range:
         ip_range = get_ip_range(chosen_interface)
         print(f"{GREEN}Using default IP range: {ip_range}{RESET}")
@@ -213,7 +201,7 @@ def main():
     else:
         scanning_tool = "masscan"
 
-    open_ports = scan_all_ports(devices, scanning_tool=scanning_tool)
+    open_ports = scan_all_ports(devices, port_range="0-65535", scanning_tool=scanning_tool)
 
     output_file = input("Enter output CSV file name (default is results.csv): ").strip() or "results.csv"
     save_results_to_csv(devices, open_ports, output_file)
