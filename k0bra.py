@@ -11,7 +11,8 @@ import requests
 import nmap
 import logging
 from typing import List, Dict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import asyncio
 import tkinter as tk
 from tkinter import ttk
 import argparse
@@ -90,18 +91,18 @@ def get_gateway(interface: str) -> str:
         return gateways[netifaces.AF_INET][interface][0]
     return None
 
-def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
+async def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
     arp_request = scapy.ARP(pdst=ip_range)
     broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
     arp_request_broadcast = broadcast / arp_request
-    answered_list = scapy.srp(arp_request_broadcast, timeout=timeout, verbose=False)[0]
+    answered_list = await scapy.async_srp(arp_request_broadcast, timeout=timeout, verbose=False)[0]
 
     devices = []
     for element in answered_list:
         device_info = {"IP": element[1].psrc, "MAC": element[1].hwsrc}
         devices.append(device_info)
         print(f"{GREEN}Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}{RESET}")
-        time.sleep(1)  # Delay to avoid hitting API rate limits
+        await asyncio.sleep(1)  # Delay to avoid hitting API rate limits
     return devices
 
 def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000, decoy: str = None, randomize: bool = False, wait: int = 2) -> Dict[str, List[int]]:
@@ -164,23 +165,23 @@ def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=
 
     return nmap_results
 
-def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", scan_tool: str = "masscan", **kwargs) -> Dict[str, List[int]]:
+async def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", scan_tool: str = "masscan", **kwargs) -> Dict[str, List[int]]:
     results = {}
     ip_range = ','.join(device['IP'] for device in devices)
 
-    with ThreadPoolExecutor() as executor:
-        if scan_tool == "masscan":
-            print(BLUE + f"Using Masscan to scan range: {ip_range}" + RESET)
-            future = executor.submit(masscan_scan, ip_range, port_range, **kwargs)
-            masscan_results = future.result()
+    loop = asyncio.get_event_loop()
+    if scan_tool == "masscan":
+        print(BLUE + f"Using Masscan to scan range: {ip_range}" + RESET)
+        future = loop.run_in_executor(None, masscan_scan, ip_range, port_range, **kwargs)
+        masscan_results = await future
 
-            for device in devices:
-                ip = device['IP']
-                if ip in masscan_results:
-                    results[ip] = masscan_results[ip]
-        elif scan_tool == "nmap":
-            future = executor.submit(nmap_scan, ip_range, port_range, **kwargs)
-            results = future.result()
+        for device in devices:
+            ip = device['IP']
+            if ip in masscan_results:
+                results[ip] = masscan_results[ip]
+    elif scan_tool == "nmap":
+        future = loop.run_in_executor(None, nmap_scan, ip_range, port_range, **kwargs)
+        results = await future
 
     return results
 
@@ -261,7 +262,7 @@ def interactive_menu():
         print(RED + "Invalid choice. Please try again." + RESET)
         interactive_menu()
 
-def scan_local_network():
+async def scan_local_network():
     active_interfaces = get_active_interfaces()
     if not active_interfaces:
         print(RED + "No active network interfaces found." + RESET)
@@ -285,7 +286,7 @@ def scan_local_network():
     if perform_arp == 'yes':
         timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
         timeout = int(timeout) if timeout.isdigit() else 2
-        devices = get_ip_mac_pairs(ip_range, timeout=timeout)
+        devices = await get_ip_mac_pairs(ip_range, timeout=timeout)
 
         if not devices:
             print(RED + "No devices found." + RESET)
@@ -301,7 +302,7 @@ def scan_local_network():
             randomize = input("Randomize scan order for Masscan? (yes/no, default is no): ").strip().lower() == 'yes'
             wait = input("Enter wait time between scans for Masscan (default is 2): ").strip()
             wait = int(wait) if wait.isdigit() else 2
-            open_ports = scan_all_ports(devices, scan_tool='masscan', port_range=port_range, rate=rate, decoy=decoy, randomize=randomize, wait=wait)
+            open_ports = await scan_all_ports(devices, scan_tool='masscan', port_range=port_range, rate=rate, decoy=decoy, randomize=randomize, wait=wait)
         elif scan_tool == '2':
             scan_type = input("Choose scan type for Nmap (sS for SYN scan, sT for TCP connect, sU for UDP scan, default is sS): ").strip()
             scan_type = scan_type if scan_type in ['sS', 'sT', 'sU'] else 'sS'
@@ -314,7 +315,7 @@ def scan_local_network():
             timing = input("Enter timing template for Nmap (0 to 5, default is 3): ").strip()
             timing = int(timing) if timing.isdigit() and 0 <= int(timing) <= 5 else 3
             scripts = input("Enter NSE scripts for Nmap (comma-separated, default is none): ").strip()
-            open_ports = scan_all_ports(devices, scan_tool='nmap', scan_type=scan_type, service_detection=service_detection, os_detection=os_detection, decoy=decoy, fragment=fragment, proxies=proxies, source_port=source_port, timing=timing, scripts=scripts)
+            open_ports = await scan_all_ports(devices, scan_tool='nmap', scan_type=scan_type, service_detection=service_detection, os_detection=os_detection, decoy=decoy, fragment=fragment, proxies=proxies, source_port=source_port, timing=timing, scripts=scripts)
 
         output_file = input("Enter output CSV file name (default is results.csv): ").strip()
         if not output_file:
@@ -326,7 +327,7 @@ def scan_local_network():
         print(YELLOW + "Skipping ARP scan." + RESET)
         target_scan(chosen_interface, ip_range)
 
-def scan_wan_target():
+async def scan_wan_target():
     target = input("Enter the WAN target (IP or domain name): ").strip()
     try:
         ip_range = socket.gethostbyname(target)
@@ -345,7 +346,7 @@ def scan_wan_target():
         randomize = input("Randomize scan order for Masscan? (yes/no, default is no): ").strip().lower() == 'yes'
         wait = input("Enter wait time between scans for Masscan (default is 2): ").strip()
         wait = int(wait) if wait.isdigit() else 2
-        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='masscan', port_range=port_range, rate=rate, decoy=decoy, randomize=randomize, wait=wait)
+        open_ports = await scan_all_ports([{'IP': ip_range}], scan_tool='masscan', port_range=port_range, rate=rate, decoy=decoy, randomize=randomize, wait=wait)
     elif scan_tool == '2':
         scan_type = input("Choose scan type for Nmap (sS for SYN scan, sT for TCP connect, sU for UDP scan, default is sS): ").strip()
         scan_type = scan_type if scan_type in ['sS', 'sT', 'sU'] else 'sS'
@@ -358,7 +359,7 @@ def scan_wan_target():
         timing = input("Enter timing template for Nmap (0 to 5, default is 3): ").strip()
         timing = int(timing) if timing.isdigit() and 0 <= int(timing) <= 5 else 3
         scripts = input("Enter NSE scripts for Nmap (comma-separated, default is none): ").strip()
-        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='nmap', scan_type=scan_type, service_detection=service_detection, os_detection=os_detection, decoy=decoy, fragment=fragment, proxies=proxies, source_port=source_port, timing=timing, scripts=scripts)
+        open_ports = await scan_all_ports([{'IP': ip_range}], scan_tool='nmap', scan_type=scan_type, service_detection=service_detection, os_detection=os_detection, decoy=decoy, fragment=fragment, proxies=proxies, source_port=source_port, timing=timing, scripts=scripts)
 
     output_file = input("Enter output CSV file name (default is results.csv): ").strip()
     if not output_file:
@@ -367,7 +368,7 @@ def scan_wan_target():
     save_results_to_csv([{'IP': ip_range}], open_ports, output_file)
     print_scan_results([{'IP': ip_range}], open_ports)
 
-def target_scan(interface, ip_range):
+async def target_scan(interface, ip_range):
     scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
     if not scan_tool or scan_tool == '1':
         port_range = input("Enter port range for Masscan (default is 0-65535): ").strip()
@@ -378,7 +379,7 @@ def target_scan(interface, ip_range):
         randomize = input("Randomize scan order for Masscan? (yes/no, default is no): ").strip().lower() == 'yes'
         wait = input("Enter wait time between scans for Masscan (default is 2): ").strip()
         wait = int(wait) if wait.isdigit() else 2
-        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='masscan', port_range=port_range, rate=rate, decoy=decoy, randomize=randomize, wait=wait)
+        open_ports = await scan_all_ports([{'IP': ip_range}], scan_tool='masscan', port_range=port_range, rate=rate, decoy=decoy, randomize=randomize, wait=wait)
     elif scan_tool == '2':
         scan_type = input("Choose scan type for Nmap (sS for SYN scan, sT for TCP connect, sU for UDP scan, default is sS): ").strip()
         scan_type = scan_type if scan_type in ['sS', 'sT', 'sU'] else 'sS'
@@ -391,7 +392,7 @@ def target_scan(interface, ip_range):
         timing = input("Enter timing template for Nmap (0 to 5, default is 3): ").strip()
         timing = int(timing) if timing.isdigit() and 0 <= int(timing) <= 5 else 3
         scripts = input("Enter NSE scripts for Nmap (comma-separated, default is none): ").strip()
-        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='nmap', scan_type=scan_type, service_detection=service_detection, os_detection=os_detection, decoy=decoy, fragment=fragment, proxies=proxies, source_port=source_port, timing=timing, scripts=scripts)
+        open_ports = await scan_all_ports([{'IP': ip_range}], scan_tool='nmap', scan_type=scan_type, service_detection=service_detection, os_detection=os_detection, decoy=decoy, fragment=fragment, proxies=proxies, source_port=source_port, timing=timing, scripts=scripts)
 
     output_file = input("Enter output CSV file name (default is results.csv): ").strip()
     if not output_file:
@@ -425,4 +426,4 @@ def main(args=None):
     interactive_menu()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
