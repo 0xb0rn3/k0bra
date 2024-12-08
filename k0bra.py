@@ -143,28 +143,20 @@ def metasploit_exploit(target_ip, target_port, service, cve_id):
 
 # Async main function
 async def main():
+    # Get user inputs for network and CVE file
     target_network = get_user_input()  # Get target network from user input
     cve_file_path = get_cve_input()  # Get CVE JSON file path from user input
+
+    # Initialize the security tool
     tool = NetworkSecurityTool(target_network)
 
     # Perform scan and get results
     network_info = {}  # Example: {'192.168.1.1': 'active'}
     open_ports = {"192.168.1.1": {"TCP": [80, 443], "UDP": [53]}}  # Example open ports
-    vulnerabilities = {}  # Example vulnerability mapping
+    vulnerabilities = {"192.168.1.1": [("CVE-2017-0143", "High")]}  # Example vulnerabilities
 
-    # Automated exploitation using Metasploit
-    for ip, ports in open_ports.items():
-        for port in ports.get("TCP", []):
-            metasploit_exploit(ip, port, 'SMB', 'CVE-2017-0143')  # Example for SMB
-        for port in ports.get("UDP", []):
-            metasploit_exploit(ip, port, 'SSL', 'CVE-2014-0160')  # Example for SSL
-        for port in ports.get("TCP", []):
-            if port == 5555:  # Example for Android Debug Bridge
-                metasploit_exploit(ip, port, "Android", "CVE-2017-13156")
-
-    # Save results
+    # Save the report
     tool.save_report(network_info, open_ports, vulnerabilities)
 
-# Start asynchronous main function
 if __name__ == "__main__":
     asyncio.run(main())
