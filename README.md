@@ -1,88 +1,38 @@
-# k0bra
+# k0bra - The Network Scavenger
 
-k0bra is a Python-based network scanning tool designed to detect devices on your local network by identifying their IP and MAC addresses. Developed by b0urn3, k0bra combines functionality with a touch of style and humor, making network scanning a bit more engaging.
-Features
+**k0bra** is a comprehensive network scanning tool developed by **b0urn3**. It integrates both **Masscan** and **Nmap**, allowing fast and stealthy scanning for IPs, MAC addresses, open ports, and services on your local network.
 
-    Network Interface Selection: Choose from available network interfaces.
-    IP and MAC Address Discovery: Scan your local network to identify devices and their MAC addresses.
-    Customizable ASCII Banner: Display a fun and customizable ASCII banner.
-    User-Friendly Output: Display scan results in a neatly formatted table.
+## Features:
+- **Fast Scanning**: Utilizes **Masscan** for rapid port scans with customizable rate control.
+- **Stealthy Scanning**: Leverage **Nmap's evasion features** like decoy IPs, fragmentation, and source port manipulation.
+- **Comprehensive Results**: Supports **Nmap’s** full capabilities for OS and service version detection.
+- **Cross-tool Functionality**: Switch between **Masscan** and **Nmap** based on scan speed and precision.
+- **Interactive Menu**: Choose scan types, interfaces, and output preferences interactively.
+- **CSV Output**: Save results in a clean CSV format, including IP, MAC, and open ports.
 
-Installation
+## Requirements:
+- Python 3.x
+- **Scapy**: `pip install scapy`
+- **Netifaces**: `pip install netifaces`
+- **Nmap**: Install via `sudo apt-get install nmap`
+- **Masscan**: Install via `sudo apt-get install masscan`
 
-To run k0bra, you'll need Python and a few dependencies. Follow these steps to get started:
+## Usage:
+1. Run the script:
+    ```bash
+    python3 k0bra.py
+    ```
+2. Follow the interactive prompts to select scan types, network interfaces, and output preferences.
 
-    Clone the Repository:
+## Evasion Features:
+- **Nmap**: Includes **decoy scanning** (`-D`), **packet fragmentation** (`-f`), **source port manipulation** (`-g`), and **proxy routing** (`--proxies`).
+- **Masscan**: Includes **rate control** and **stealth scanning** features.
 
-    bash
+## License:
+This tool is licensed under the MIT License.
 
-git clone https://github.com/q4n0/k0bra.git
-cd k0bra
+---
 
-Create a Virtual Environment (Optional but Recommended):
+**Developed by b0urn3.**  
+Find more tools at: [https://github.com/q4n0](https://github.com/q4n0)
 
-bash
-
-python3 -m venv venv
-source venv/bin/activate
-
-Install Dependencies:
-
-Create a requirements.txt file with the following content:
-
-scapy
-netifaces
-tabulate
-pillow
-pyfiglet
-
-Install the dependencies using pip:
-
-bash
-or skip and use the default one
-
-    pip install -r requirements.txt
-
-Usage
-
-    Run the Script:
-
-    bash
-
-    python k0bra.py
-
-    Follow the Prompts:
-        Choose a network interface from the list.
-        The script will scan the local network and display a table with IP and MAC addresses of detected devices.
-
-Example
-
-Here's an example of what the output might look like:
-
-vbnet
-
-@@@@@@@@@@@@@@@@@@@@
-@@@@@@@*###*#@@@@@@@
-@@@@@@*+#*#*+%@@@@@@
-...
-Ready to hunt down the hidden prey on your network!
-
-Current connected interface: eth0
-Other active network interfaces:
-  1. wlan0
-
-Enter the number of the network interface you want to use (default current interface): 
-
-Scanning IP range: 192.168.1.0/24
-
-Information for interface: eth0
-+----------------+-------------------+
-| IP             | MAC               |
-+----------------+-------------------+
-| 192.168.1.1    | 00:11:22:33:44:55 |
-| 192.168.1.10   | aa:bb:cc:dd:ee:ff |
-+----------------+-------------------+
-
-No devices found on the network. Did the snakes slither away?
-
-Scan complete. The hunt is over. Time to slither back!
