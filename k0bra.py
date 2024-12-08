@@ -8,6 +8,7 @@ import requests
 import subprocess
 import asyncio
 import json
+import csv
 from typing import List, Dict
 
 # ANSI color codes
@@ -83,6 +84,20 @@ class NetworkSecurityTool:
         logger.setLevel(logging.INFO)
         return logger
 
+    def save_report(self, network_info, open_ports, vulnerabilities):
+        """Generate a CSV report for the scan results."""
+        with open('scan_report.csv', mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['IP Address', 'Open Ports', 'Vulnerabilities', 'Risk Score'])
+            for ip, ports in open_ports.items():
+                vulnerability_list = []
+                risk_score = 'None'
+                for vulnerability in vulnerabilities.get(ip, []):
+                    vulnerability_list.append(vulnerability[0])
+                    risk_score = vulnerability[1]  # Assuming first vulnerability is most critical
+                writer.writerow([ip, ', '.join(map(str, ports)), ', '.join(vulnerability_list), risk_score])
+        print(GREEN + "Scan report saved as scan_report.csv" + RESET)
+
 class NetworkDiscovery:
     def network_scan(self, target):
         """
@@ -128,10 +143,10 @@ class VulnerabilityScanner:
 
     def assess_vulnerabilities(self, service_info):
         """Match discovered services with vulnerabilities"""
-        vulnerabilities = []
+        vulnerabilities = {}
         for service, version in service_info.items():
             if service in self.cve_database:
-                vulnerabilities.append((service, self.cve_database[service]))
+                vulnerabilities[service] = self.cve_database[service]
         return vulnerabilities
 
     def calculate_risk(self, cve_data):
@@ -215,6 +230,11 @@ async def main():
     print("Network Info:", network_info)
     print("Open Ports:", open_ports)
     print("Vulnerabilities:", vulnerabilities)
+    
+    # Save report as CSV
+    tool.save_report(network_info, open_ports, vulnerabilities)
+    
+    # Show visualization
     topology.show()
 
 # Start asynchronous main function
