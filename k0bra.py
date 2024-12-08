@@ -253,6 +253,8 @@ def main(args=None):
         print(RED + "No active network interfaces found." + RESET)
         sys.exit(1)
 
+    print(f"{GREEN}Active interfaces: {active_interfaces}{RESET}")
+
     chosen_interface = args.interface if args.interface else active_interfaces[0]
     print(f"{GREEN}Current connected interface: {chosen_interface}{RESET}")
 
