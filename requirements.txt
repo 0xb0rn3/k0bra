@@ -1,3 +1,6 @@
 scapy
 netifaces
 tabulate
+requests
+time
+nmap
