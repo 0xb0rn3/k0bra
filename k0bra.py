@@ -42,6 +42,32 @@ METASPLOIT_MODULES = {
     },
 }
 
+# Fetch CVE data from CIRCL API
+def fetch_cve_data():
+    """Fetches the latest CVE details from the CIRCL API."""
+    url = "https://cve.circl.lu/api/last"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        cve_data = response.json()
+        return cve_data
+    except requests.exceptions.RequestException as e:
+        print(f"{RED}Error fetching CVE data: {e}{RESET}")
+        return None
+
+# Function to display CVE details
+def display_cve_data(cve_data):
+    """Displays fetched CVE data."""
+    if cve_data:
+        print(GREEN + "Latest CVEs:" + RESET)
+        for cve in cve_data:
+            print(f"{CYAN}CVE ID: {cve['id']}{RESET}")
+            print(f"{YELLOW}Description: {cve['summary']}{RESET}")
+            print(f"{RED}Published Date: {cve['Published']}{RESET}")
+            print(f"{YELLOW}CVSS Score: {cve['cvss']}\n{RESET}")
+    else:
+        print(RED + "No CVE data available." + RESET)
+
 def print_banner():
     """Prints the banner for the tool."""
     print(CYAN + "    ██   ██  ██████  ██████  ██████  ██████  ███████  ███████  ███████  ")
@@ -150,13 +176,21 @@ async def main():
     # Initialize the security tool
     tool = NetworkSecurityTool(target_network)
 
-    # Perform scan and get results
+    # Fetch and display the latest CVEs
+    cve_data = fetch_cve_data()  # Fetch latest CVE data
+    display_cve_data(cve_data)   # Display the fetched CVE data
+
+    # Perform scan and get results (example)
     network_info = {}  # Example: {'192.168.1.1': 'active'}
-    open_ports = {"192.168.1.1": {"TCP": [80, 443], "UDP": [53]}}  # Example open ports
-    vulnerabilities = {"192.168.1.1": [("CVE-2017-0143", "High")]}  # Example vulnerabilities
+    open_ports = {"192.168.1.1": [22, 80, 443]}  # Example: IP with open ports
+    vulnerabilities = {"192.168.1.1": [("CVE-2021-34527", 9)]}  # Example vulnerabilities
+    tool.save_report(network_info, open_ports, vulnerabilities)  # Save report as CSV
 
-    # Save the report
-    tool.save_report(network_info, open_ports, vulnerabilities)
+    # Trigger Metasploit exploit based on found vulnerabilities
+    for ip, vulns in vulnerabilities.items():
+        for cve, risk in vulns:
+            metasploit_exploit(ip, 443, "HTTP", cve)  # Example for HTTP service with CVE-2021-34527
 
+# Run the main function
 if __name__ == "__main__":
     asyncio.run(main())
