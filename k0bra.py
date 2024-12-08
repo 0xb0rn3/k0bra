@@ -101,7 +101,7 @@ class NetworkSecurityTool:
 class NetworkDiscovery:
     def network_scan(self, target):
         """
-        Perform network discovery using ICMP and SYN scans
+        Perform network discovery using ICMP, ARP, TCP, and UDP scans
         
         Args:
             target (str): Network range to scan
@@ -109,16 +109,34 @@ class NetworkDiscovery:
         Returns:
             dict: Discovered network topology
         """
+        network_info = {}
+
+        # ICMP Ping Scan
         icmp_response = scapy.sr1(scapy.IP(dst=target)/scapy.ICMP(), timeout=2, verbose=False)
         if icmp_response:
-            return {target: 'Alive'}
-        return {target: 'Inactive'}
+            network_info[target] = 'Alive (via ICMP)'
+
+        # ARP Scan (Layer 2 discovery)
+        arp_response = scapy.arping(target, timeout=2, verbose=False)
+        for sent, received in arp_response:
+            network_info[received.psrc] = 'Alive (via ARP)'
+
+        return network_info
 
     def port_enumeration(self, host):
-        """Perform port scanning using Nmap"""
+        """Perform port scanning using Nmap (TCP + UDP)"""
         nm = nmap.PortScanner()
-        nm.scan(hosts=host, arguments="-p 1-65535")
-        open_ports = [port for port in nm[host]['tcp'] if nm[host]['tcp'][port]['state'] == 'open']
+        nm.scan(hosts=host, arguments="-p 1-65535 -sS -sU")  # SYN scan (TCP) + UDP scan
+        open_ports = {'TCP': [], 'UDP': []}
+
+        # Check TCP ports
+        if 'tcp' in nm[host]:
+            open_ports['TCP'] = [port for port in nm[host]['tcp'] if nm[host]['tcp'][port]['state'] == 'open']
+
+        # Check UDP ports
+        if 'udp' in nm[host]:
+            open_ports['UDP'] = [port for port in nm[host]['udp'] if nm[host]['udp'][port]['state'] == 'open']
+
         return open_ports
 
 class VulnerabilityScanner:
