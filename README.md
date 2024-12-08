@@ -18,11 +18,13 @@
 - **Masscan**
 
 ## Usage:
-1. Run the script:
+1. Run the script
+2. Example:
     ```bash
-    sudo python3 k0bra.py
+    sudo python3 k0bra.py --interface eth0 --target 192.168.1.0/24 
+
     ```
-2. Follow the interactive prompts to select scan types, network interfaces, and output preferences.
+3. Follow the interactive prompts to select scan types, network interfaces, and output preferences.
 
 ## Evasion Features:
 - **Nmap**: Includes **decoy scanning** (`-D`), **packet fragmentation** (`-f`), **source port manipulation** (`-g`), and **proxy routing** (`--proxies`).
