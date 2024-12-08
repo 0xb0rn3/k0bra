@@ -292,6 +292,7 @@ def scan_local_network():
         output_file = 'results.csv'
 
     save_results_to_csv(devices, open_ports, output_file)
+    print_scan_results(devices, open_ports)
 
 def scan_wan_target():
     target = input("Enter the WAN target (IP or domain name): ").strip()
@@ -322,6 +323,15 @@ def scan_wan_target():
         output_file = 'results.csv'
 
     save_results_to_csv(devices, open_ports, output_file)
+    print_scan_results(devices, open_ports)
+
+def print_scan_results(devices, open_ports):
+    print(GREEN + "Scan Results:" + RESET)
+    for device in devices:
+        ip = device['IP']
+        mac = device['MAC']
+        ports = ', '.join(map(str, open_ports.get(ip, [])))
+        print(f"IP: {ip}, MAC: {mac}, Open Ports: {ports}")
 
 def main(args=None):
     if args is None:
