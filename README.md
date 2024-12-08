@@ -14,13 +14,13 @@
 - Python 3.x
 - **Scapy**: `pip install scapy`
 - **Netifaces**: `pip install netifaces`
-- **Nmap**: Install via `sudo apt-get install nmap`
-- **Masscan**: Install via `sudo apt-get install masscan`
+- **Nmap**: Install via `DEBIAN: sudo apt-get install nmap ARCH:sudo pacman -Sy nmap REDHAT/FEDORA: sudo dnf install nmap` 
+- **Masscan**
 
 ## Usage:
 1. Run the script:
     ```bash
-    python3 k0bra.py
+    sudo python3 k0bra.py
     ```
 2. Follow the interactive prompts to select scan types, network interfaces, and output preferences.
 
