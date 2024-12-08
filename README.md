@@ -14,7 +14,7 @@
 - Python 3.x
 - **Scapy**: `pip install scapy`
 - **Netifaces**: `pip install netifaces`
-- **Nmap**: Install via `DEBIAN: sudo apt-get install nmap ARCH:sudo pacman -Sy nmap REDHAT/FEDORA: sudo dnf install nmap` 
+- **Nmap**: Install via `pip install python-nmap `
 - **Masscan**
 
 ## Usage:
