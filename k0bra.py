@@ -8,8 +8,8 @@ import os
 import signal
 import time
 import requests
+import nmap
 from typing import List, Dict
-import nmap  # Import the Nmap module
 
 # ANSI color codes
 RED = "\033[91m"
@@ -19,7 +19,7 @@ BLUE = "\033[94m"
 CYAN = "\033[96m"
 RESET = "\033[0m"
 
-def print_header():
+def print_banner():
     print(CYAN + "    ██   ██  ██████  ██████  ██████   █████  ")
     print("    ██  ██  ██  ████ ██   ██ ██   ██ ██   ██ ")
     print("    █████   ██ ██ ██ ██████  ██████  ███████ ")
@@ -110,12 +110,23 @@ def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) 
         print(RED + f"Masscan failed: {e}" + RESET)
     return masscan_results
 
-def nmap_scan(ip_range: str, port_range: str = "1-65535") -> Dict[str, List[int]]:
+def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=None, fragment=False, proxies=None, source_port=None, timing=3) -> Dict[str, List[int]]:
     nm = nmap.PortScanner()
     print(BLUE + f"Scanning using Nmap on range: {ip_range}" + RESET)
     
     try:
-        nm.scan(hosts=ip_range, arguments=f'-p {port_range} -sS -T4')  # SYN scan, faster timing
+        nmap_args = f'-p {port_range} -{scan_type} -T{timing}'
+        
+        if decoy:
+            nmap_args += f' -D {decoy}'
+        if fragment:
+            nmap_args += ' -f'
+        if proxies:
+            nmap_args += f' --proxies {proxies}'
+        if source_port:
+            nmap_args += f' -g {source_port}'
+        
+        nm.scan(hosts=ip_range, arguments=nmap_args)
     except Exception as e:
         print(RED + f"Nmap scan failed: {e}" + RESET)
         return {}
@@ -162,7 +173,7 @@ def main():
     # Handle Ctrl+C for clean exit
     signal.signal(signal.SIGINT, handle_exit)
 
-    print_header()
+    print_banner()
 
     if not is_masscan_installed():
         install_masscan()
