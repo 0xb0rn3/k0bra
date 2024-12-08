@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
 from tkinter import ttk
 import argparse
+import socket
 
 # ANSI color codes
 RED = "\033[91m"
@@ -234,6 +235,94 @@ def start_scan(interface, ip_range, scan_tool, target):
     args = argparse.Namespace(interface=interface, ip_range=ip_range, scan_tool=scan_tool, output='results.csv', target=target)
     main(args)
 
+def interactive_menu():
+    print_banner()
+    print(GREEN + "Interactive Menu:" + RESET)
+    print("1. Scan Local Network")
+    print("2. Scan WAN Target")
+    print("3. Exit")
+
+    choice = input("Enter your choice: ")
+    if choice == '1':
+        scan_local_network()
+    elif choice == '2':
+        scan_wan_target()
+    elif choice == '3':
+        sys.exit(0)
+    else:
+        print(RED + "Invalid choice. Please try again." + RESET)
+        interactive_menu()
+
+def scan_local_network():
+    active_interfaces = get_active_interfaces()
+    if not active_interfaces:
+        print(RED + "No active network interfaces found." + RESET)
+        sys.exit(1)
+
+    print(f"{GREEN}Active interfaces: {active_interfaces}{RESET}")
+    print(f"{GREEN}Available interfaces:{RESET}")
+    for i, iface in enumerate(active_interfaces):
+        print(f"  {i + 1}. {iface}")
+    iface_choice = input(f"Enter the number of the network interface you want to use: ")
+    if iface_choice.isdigit() and 0 < int(iface_choice) <= len(active_interfaces):
+        chosen_interface = active_interfaces[int(iface_choice) - 1]
+    else:
+        print(RED + "Invalid choice. Using default interface." + RESET)
+        chosen_interface = active_interfaces[0]
+
+    print(f"{GREEN}Current connected interface: {chosen_interface}{RESET}")
+    ip_range = get_ip_range(chosen_interface)
+    timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
+    timeout = int(timeout) if timeout.isdigit() else 2
+
+    devices = get_ip_mac_pairs(ip_range, timeout=timeout)
+
+    if not devices:
+        print(RED + "No devices found." + RESET)
+        return
+
+    scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
+    if not scan_tool or scan_tool == '1':
+        open_ports = scan_all_ports(devices, scan_tool='masscan')
+    elif scan_tool == '2':
+        open_ports = scan_all_ports(devices, scan_tool='nmap')
+
+    output_file = input("Enter output CSV file name (default is results.csv): ").strip()
+    if not output_file:
+        output_file = 'results.csv'
+
+    save_results_to_csv(devices, open_ports, output_file)
+
+def scan_wan_target():
+    target = input("Enter the WAN target (IP or domain name): ").strip()
+    try:
+        ip_range = socket.gethostbyname(target)
+        print(f"{GREEN}Resolved target {target} to IP: {ip_range}{RESET}")
+    except socket.gaierror:
+        print(RED + f"Could not resolve target {target}. Please check the target and try again." + RESET)
+        return
+
+    timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
+    timeout = int(timeout) if timeout.isdigit() else 2
+
+    devices = get_ip_mac_pairs(ip_range, timeout=timeout)
+
+    if not devices:
+        print(RED + "No devices found." + RESET)
+        return
+
+    scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
+    if not scan_tool or scan_tool == '1':
+        open_ports = scan_all_ports(devices, scan_tool='masscan')
+    elif scan_tool == '2':
+        open_ports = scan_all_ports(devices, scan_tool='nmap')
+
+    output_file = input("Enter output CSV file name (default is results.csv): ").strip()
+    if not output_file:
+        output_file = 'results.csv'
+
+    save_results_to_csv(devices, open_ports, output_file)
+
 def main(args=None):
     if args is None:
         args = parse_arguments()
@@ -248,45 +337,7 @@ def main(args=None):
         print(YELLOW + "Please run the script again after Masscan installation." + RESET)
         sys.exit(1)
 
-    active_interfaces = get_active_interfaces()
-    if not active_interfaces:
-        print(RED + "No active network interfaces found." + RESET)
-        sys.exit(1)
-
-    print(f"{GREEN}Active interfaces: {active_interfaces}{RESET}")
-
-    if args.interface:
-        chosen_interface = args.interface
-    else:
-        print(f"{GREEN}Available interfaces:{RESET}")
-        for i, iface in enumerate(active_interfaces):
-            print(f"  {i + 1}. {iface}")
-        iface_choice = input(f"Enter the number of the network interface you want to use: ")
-        if iface_choice.isdigit() and 0 < int(iface_choice) <= len(active_interfaces):
-            chosen_interface = active_interfaces[int(iface_choice) - 1]
-        else:
-            print(RED + "Invalid choice. Using default interface." + RESET)
-            chosen_interface = active_interfaces[0]
-
-    print(f"{GREEN}Current connected interface: {chosen_interface}{RESET}")
-
-    if args.target:
-        ip_range = args.target
-    else:
-        ip_range = args.ip_range if args.ip_range else get_ip_range(chosen_interface)
-
-    timeout = args.timeout
-
-    devices = get_ip_mac_pairs(ip_range, timeout=timeout)
-
-    if not devices:
-        print(RED + "No devices found." + RESET)
-        return
-
-    open_ports = scan_all_ports(devices, scan_tool=args.scan_tool)
-    output_file = args.output
-
-    save_results_to_csv(devices, open_ports, output_file)
+    interactive_menu()
 
 if __name__ == "__main__":
     main()
