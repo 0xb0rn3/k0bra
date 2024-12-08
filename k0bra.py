@@ -104,10 +104,14 @@ def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
         time.sleep(1)  # Delay to avoid hitting API rate limits
     return devices
 
-def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) -> Dict[str, List[int]]:
+def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000, decoy: str = None, randomize: bool = False, wait: int = 2) -> Dict[str, List[int]]:
     masscan_results = {}
     stealth_options = f"--rate {rate}"  # Stealth options for Masscan
-    command = f"masscan {ip_range} -p{port_range} {stealth_options} --wait 2"
+    if decoy:
+        stealth_options += f" --randomize-hosts {decoy}"
+    if randomize:
+        stealth_options += " --randomize-hosts"
+    command = f"masscan {ip_range} -p{port_range} {stealth_options} --wait {wait}"
     try:
         result = subprocess.check_output(command, shell=True, text=True)
         for line in result.splitlines():
@@ -123,7 +127,7 @@ def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) 
         print(RED + f"Masscan failed: {e}" + RESET)
     return masscan_results
 
-def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=None, fragment=False, proxies=None, source_port=None, timing=3, scripts=None) -> Dict[str, List[int]]:
+def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=None, fragment=False, proxies=None, source_port=None, timing=3, scripts=None, service_detection=False, os_detection=False) -> Dict[str, List[int]]:
     nm = nmap.PortScanner()
     print(BLUE + f"Scanning using Nmap on range: {ip_range}" + RESET)
 
@@ -140,6 +144,10 @@ def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=
             nmap_args += f' -g {source_port}'
         if scripts:
             nmap_args += f' --script {scripts}'
+        if service_detection:
+            nmap_args += ' -sV'
+        if os_detection:
+            nmap_args += ' -O'
 
         nm.scan(hosts=ip_range, arguments=nmap_args)
     except Exception as e:
@@ -156,14 +164,14 @@ def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=
 
     return nmap_results
 
-def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", scan_tool: str = "masscan") -> Dict[str, List[int]]:
+def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", scan_tool: str = "masscan", **kwargs) -> Dict[str, List[int]]:
     results = {}
     ip_range = ','.join(device['IP'] for device in devices)
 
     with ThreadPoolExecutor() as executor:
         if scan_tool == "masscan":
             print(BLUE + f"Using Masscan to scan range: {ip_range}" + RESET)
-            future = executor.submit(masscan_scan, ip_range, port_range)
+            future = executor.submit(masscan_scan, ip_range, port_range, **kwargs)
             masscan_results = future.result()
 
             for device in devices:
@@ -171,7 +179,7 @@ def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", s
                 if ip in masscan_results:
                     results[ip] = masscan_results[ip]
         elif scan_tool == "nmap":
-            future = executor.submit(nmap_scan, ip_range, port_range)
+            future = executor.submit(nmap_scan, ip_range, port_range, **kwargs)
             results = future.result()
 
     return results
@@ -285,9 +293,28 @@ def scan_local_network():
 
         scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
         if not scan_tool or scan_tool == '1':
-            open_ports = scan_all_ports(devices, scan_tool='masscan')
+            port_range = input("Enter port range for Masscan (default is 0-65535): ").strip()
+            port_range = port_range if port_range else "0-65535"
+            rate = input("Enter rate for Masscan (default is 50000): ").strip()
+            rate = int(rate) if rate.isdigit() else 50000
+            decoy = input("Enter decoy IPs for Masscan (comma-separated, default is none): ").strip()
+            randomize = input("Randomize scan order for Masscan? (yes/no, default is no): ").strip().lower() == 'yes'
+            wait = input("Enter wait time between scans for Masscan (default is 2): ").strip()
+            wait = int(wait) if wait.isdigit() else 2
+            open_ports = scan_all_ports(devices, scan_tool='masscan', port_range=port_range, rate=rate, decoy=decoy, randomize=randomize, wait=wait)
         elif scan_tool == '2':
-            open_ports = scan_all_ports(devices, scan_tool='nmap')
+            scan_type = input("Choose scan type for Nmap (sS for SYN scan, sT for TCP connect, sU for UDP scan, default is sS): ").strip()
+            scan_type = scan_type if scan_type in ['sS', 'sT', 'sU'] else 'sS'
+            service_detection = input("Enable service version detection for Nmap? (yes/no, default is no): ").strip().lower() == 'yes'
+            os_detection = input("Enable OS detection for Nmap? (yes/no, default is no): ").strip().lower() == 'yes'
+            decoy = input("Enter decoy IPs for Nmap (comma-separated, default is none): ").strip()
+            fragment = input("Enable fragmentation for Nmap? (yes/no, default is no): ").strip().lower() == 'yes'
+            proxies = input("Enter proxies for Nmap (default is none): ").strip()
+            source_port = input("Enter source port for Nmap (default is none): ").strip()
+            timing = input("Enter timing template for Nmap (0 to 5, default is 3): ").strip()
+            timing = int(timing) if timing.isdigit() and 0 <= int(timing) <= 5 else 3
+            scripts = input("Enter NSE scripts for Nmap (comma-separated, default is none): ").strip()
+            open_ports = scan_all_ports(devices, scan_tool='nmap', scan_type=scan_type, service_detection=service_detection, os_detection=os_detection, decoy=decoy, fragment=fragment, proxies=proxies, source_port=source_port, timing=timing, scripts=scripts)
 
         output_file = input("Enter output CSV file name (default is results.csv): ").strip()
         if not output_file:
@@ -310,9 +337,28 @@ def scan_wan_target():
 
     scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
     if not scan_tool or scan_tool == '1':
-        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='masscan')
+        port_range = input("Enter port range for Masscan (default is 0-65535): ").strip()
+        port_range = port_range if port_range else "0-65535"
+        rate = input("Enter rate for Masscan (default is 50000): ").strip()
+        rate = int(rate) if rate.isdigit() else 50000
+        decoy = input("Enter decoy IPs for Masscan (comma-separated, default is none): ").strip()
+        randomize = input("Randomize scan order for Masscan? (yes/no, default is no): ").strip().lower() == 'yes'
+        wait = input("Enter wait time between scans for Masscan (default is 2): ").strip()
+        wait = int(wait) if wait.isdigit() else 2
+        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='masscan', port_range=port_range, rate=rate, decoy=decoy, randomize=randomize, wait=wait)
     elif scan_tool == '2':
-        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='nmap')
+        scan_type = input("Choose scan type for Nmap (sS for SYN scan, sT for TCP connect, sU for UDP scan, default is sS): ").strip()
+        scan_type = scan_type if scan_type in ['sS', 'sT', 'sU'] else 'sS'
+        service_detection = input("Enable service version detection for Nmap? (yes/no, default is no): ").strip().lower() == 'yes'
+        os_detection = input("Enable OS detection for Nmap? (yes/no, default is no): ").strip().lower() == 'yes'
+        decoy = input("Enter decoy IPs for Nmap (comma-separated, default is none): ").strip()
+        fragment = input("Enable fragmentation for Nmap? (yes/no, default is no): ").strip().lower() == 'yes'
+        proxies = input("Enter proxies for Nmap (default is none): ").strip()
+        source_port = input("Enter source port for Nmap (default is none): ").strip()
+        timing = input("Enter timing template for Nmap (0 to 5, default is 3): ").strip()
+        timing = int(timing) if timing.isdigit() and 0 <= int(timing) <= 5 else 3
+        scripts = input("Enter NSE scripts for Nmap (comma-separated, default is none): ").strip()
+        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='nmap', scan_type=scan_type, service_detection=service_detection, os_detection=os_detection, decoy=decoy, fragment=fragment, proxies=proxies, source_port=source_port, timing=timing, scripts=scripts)
 
     output_file = input("Enter output CSV file name (default is results.csv): ").strip()
     if not output_file:
@@ -324,9 +370,28 @@ def scan_wan_target():
 def target_scan(interface, ip_range):
     scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
     if not scan_tool or scan_tool == '1':
-        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='masscan')
+        port_range = input("Enter port range for Masscan (default is 0-65535): ").strip()
+        port_range = port_range if port_range else "0-65535"
+        rate = input("Enter rate for Masscan (default is 50000): ").strip()
+        rate = int(rate) if rate.isdigit() else 50000
+        decoy = input("Enter decoy IPs for Masscan (comma-separated, default is none): ").strip()
+        randomize = input("Randomize scan order for Masscan? (yes/no, default is no): ").strip().lower() == 'yes'
+        wait = input("Enter wait time between scans for Masscan (default is 2): ").strip()
+        wait = int(wait) if wait.isdigit() else 2
+        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='masscan', port_range=port_range, rate=rate, decoy=decoy, randomize=randomize, wait=wait)
     elif scan_tool == '2':
-        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='nmap')
+        scan_type = input("Choose scan type for Nmap (sS for SYN scan, sT for TCP connect, sU for UDP scan, default is sS): ").strip()
+        scan_type = scan_type if scan_type in ['sS', 'sT', 'sU'] else 'sS'
+        service_detection = input("Enable service version detection for Nmap? (yes/no, default is no): ").strip().lower() == 'yes'
+        os_detection = input("Enable OS detection for Nmap? (yes/no, default is no): ").strip().lower() == 'yes'
+        decoy = input("Enter decoy IPs for Nmap (comma-separated, default is none): ").strip()
+        fragment = input("Enable fragmentation for Nmap? (yes/no, default is no): ").strip().lower() == 'yes'
+        proxies = input("Enter proxies for Nmap (default is none): ").strip()
+        source_port = input("Enter source port for Nmap (default is none): ").strip()
+        timing = input("Enter timing template for Nmap (0 to 5, default is 3): ").strip()
+        timing = int(timing) if timing.isdigit() and 0 <= int(timing) <= 5 else 3
+        scripts = input("Enter NSE scripts for Nmap (comma-separated, default is none): ").strip()
+        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='nmap', scan_type=scan_type, service_detection=service_detection, os_detection=os_detection, decoy=decoy, fragment=fragment, proxies=proxies, source_port=source_port, timing=timing, scripts=scripts)
 
     output_file = input("Enter output CSV file name (default is results.csv): ").strip()
     if not output_file:
