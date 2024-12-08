@@ -30,11 +30,11 @@ RESET = "\033[0m"
 logging.basicConfig(filename='k0bra.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def print_banner():
-    print(CYAN + "    ██   ██  ██████  ██████  ██████   █████  ")
-    print("    ██  ██  ██  ████ ██   ██ ██   ██ ██   ██ ")
-    print("    █████   ██ ██ ██ ██████  ██████  ███████ ")
-    print("    ██  ██  ████  ██ ██   ██ ██   ██ ██   ██ ")
-    print("    ██   ██  ██████  ██████  ██   ██ ██   ██ " + RESET)
+    print(CYAN + "    ██   ██  ██████  ██████  ██████  ██████   █████  ")
+    print("    ██  ██  ██  ████ ██   ██ ██   ██ ██   ██ ██   ██ ")
+    print("    █████   ██ ██ ██ ██████  ██████  ██████  ███████ ")
+    print("    ██  ██  ████  ██   ██ ██   ██ ██   ██ ██   ██ ")
+    print("    ██   ██  ██████  ██   ██ ██   ██ ██   ██ ██   ██ " + RESET)
     print(GREEN + "Welcome to k0bra - The Network Scavenger! Developed by b0urn3.")
     print("Other tools found at https://github.com/q4n0")
     print("Email: b0urn3@proton.me Instagram: onlybyhive\n" + RESET)
@@ -95,10 +95,10 @@ async def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, st
     arp_request = scapy.ARP(pdst=ip_range)
     broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
     arp_request_broadcast = broadcast / arp_request
-    answered_list = await scapy.async_srp(arp_request_broadcast, timeout=timeout, verbose=False)[0]
+    answered_list = await asyncio.create_task(scapy.srp(arp_request_broadcast, timeout=timeout, verbose=False))
 
     devices = []
-    for element in answered_list:
+    for element in answered_list[0]:
         device_info = {"IP": element[1].psrc, "MAC": element[1].hwsrc}
         devices.append(device_info)
         print(f"{GREEN}Found device: IP: {device_info['IP']}, MAC: {device_info['MAC']}{RESET}")
@@ -242,7 +242,7 @@ def create_gui():
 def start_scan(interface, ip_range, scan_tool, target):
     # Implement the scan logic here
     args = argparse.Namespace(interface=interface, ip_range=ip_range, scan_tool=scan_tool, output='results.csv', target=target)
-    main(args)
+    asyncio.run(main(args))
 
 def interactive_menu():
     print_banner()
@@ -253,9 +253,9 @@ def interactive_menu():
 
     choice = input("Enter your choice: ")
     if choice == '1':
-        scan_local_network()
+        asyncio.run(scan_local_network())
     elif choice == '2':
-        scan_wan_target()
+        asyncio.run(scan_wan_target())
     elif choice == '3':
         sys.exit(0)
     else:
@@ -325,7 +325,7 @@ async def scan_local_network():
         print_scan_results(devices, open_ports)
     else:
         print(YELLOW + "Skipping ARP scan." + RESET)
-        target_scan(chosen_interface, ip_range)
+        await target_scan(chosen_interface, ip_range)
 
 async def scan_wan_target():
     target = input("Enter the WAN target (IP or domain name): ").strip()
@@ -409,7 +409,7 @@ def print_scan_results(devices, open_ports):
         ports = ', '.join(map(str, open_ports.get(ip, [])))
         print(f"IP: {ip}, MAC: {mac}, Open Ports: {ports}")
 
-def main(args=None):
+async def main(args=None):
     if args is None:
         args = parse_arguments()
 
@@ -423,7 +423,7 @@ def main(args=None):
         print(YELLOW + "Please run the script again after Masscan installation." + RESET)
         sys.exit(1)
 
-    interactive_menu()
+    await interactive_menu()
 
 if __name__ == "__main__":
     asyncio.run(main())
