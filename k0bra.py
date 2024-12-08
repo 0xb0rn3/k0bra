@@ -272,27 +272,32 @@ def scan_local_network():
 
     print(f"{GREEN}Current connected interface: {chosen_interface}{RESET}")
     ip_range = get_ip_range(chosen_interface)
-    timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
-    timeout = int(timeout) if timeout.isdigit() else 2
 
-    devices = get_ip_mac_pairs(ip_range, timeout=timeout)
+    perform_arp = input("Do you want to perform an ARP scan? (yes/no): ").strip().lower()
+    if perform_arp == 'yes':
+        timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
+        timeout = int(timeout) if timeout.isdigit() else 2
+        devices = get_ip_mac_pairs(ip_range, timeout=timeout)
 
-    if not devices:
-        print(RED + "No devices found." + RESET)
-        return
+        if not devices:
+            print(RED + "No devices found." + RESET)
+            return
 
-    scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
-    if not scan_tool or scan_tool == '1':
-        open_ports = scan_all_ports(devices, scan_tool='masscan')
-    elif scan_tool == '2':
-        open_ports = scan_all_ports(devices, scan_tool='nmap')
+        scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
+        if not scan_tool or scan_tool == '1':
+            open_ports = scan_all_ports(devices, scan_tool='masscan')
+        elif scan_tool == '2':
+            open_ports = scan_all_ports(devices, scan_tool='nmap')
 
-    output_file = input("Enter output CSV file name (default is results.csv): ").strip()
-    if not output_file:
-        output_file = 'results.csv'
+        output_file = input("Enter output CSV file name (default is results.csv): ").strip()
+        if not output_file:
+            output_file = 'results.csv'
 
-    save_results_to_csv(devices, open_ports, output_file)
-    print_scan_results(devices, open_ports)
+        save_results_to_csv(devices, open_ports, output_file)
+        print_scan_results(devices, open_ports)
+    else:
+        print(YELLOW + "Skipping ARP scan." + RESET)
+        target_scan(chosen_interface, ip_range)
 
 def scan_wan_target():
     target = input("Enter the WAN target (IP or domain name): ").strip()
@@ -303,6 +308,20 @@ def scan_wan_target():
         print(RED + f"Could not resolve target {target}. Please check the target and try again." + RESET)
         return
 
+    scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
+    if not scan_tool or scan_tool == '1':
+        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='masscan')
+    elif scan_tool == '2':
+        open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='nmap')
+
+    output_file = input("Enter output CSV file name (default is results.csv): ").strip()
+    if not output_file:
+        output_file = 'results.csv'
+
+    save_results_to_csv([{'IP': ip_range}], open_ports, output_file)
+    print_scan_results([{'IP': ip_range}], open_ports)
+
+def target_scan(interface, ip_range):
     scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
     if not scan_tool or scan_tool == '1':
         open_ports = scan_all_ports([{'IP': ip_range}], scan_tool='masscan')
