@@ -30,11 +30,11 @@ RESET = "\033[0m"
 logging.basicConfig(filename='k0bra.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def print_banner():
-    print(CYAN + "    ██   ██  ██████  ██████  ██████  ██████   █████  ")
+    print(CYAN + "    ██   ██  ██████  ██████  ██████  ██████  ███████  ███████  ███████  ")
     print("    ██  ██  ██  ████ ██   ██ ██   ██ ██   ██ ██   ██ ")
-    print("    █████   ██ ██ ██ ██████  ██████  ██████  ███████ ")
-    print("    ██  ██  ████  ██   ██ ██   ██ ██   ██ ██   ██ ")
-    print("    ██   ██  ██████  ██   ██ ██   ██ ██   ██ ██   ██ " + RESET)
+    print("    █████   ██ ██ ██ ██████  ██████  ███████  ████████  ████████  ")
+    print("    ██  ██  ████ ██   ██ ██   ██ ██   ██ ██   ██ ██   ██ ")
+    print("    ██   ██  ██████  ██████  ███████  ████████  ████████  ████████  ")
     print(GREEN + "Welcome to k0bra - The Network Scavenger! Developed by b0urn3.")
     print("Other tools found at https://github.com/q4n0")
     print("Email: b0urn3@proton.me Instagram: onlybyhive\n" + RESET)
