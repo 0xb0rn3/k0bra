@@ -255,7 +255,19 @@ def main(args=None):
 
     print(f"{GREEN}Active interfaces: {active_interfaces}{RESET}")
 
-    chosen_interface = args.interface if args.interface else active_interfaces[0]
+    if args.interface:
+        chosen_interface = args.interface
+    else:
+        print(f"{GREEN}Available interfaces:{RESET}")
+        for i, iface in enumerate(active_interfaces):
+            print(f"  {i + 1}. {iface}")
+        iface_choice = input(f"Enter the number of the network interface you want to use: ")
+        if iface_choice.isdigit() and 0 < int(iface_choice) <= len(active_interfaces):
+            chosen_interface = active_interfaces[int(iface_choice) - 1]
+        else:
+            print(RED + "Invalid choice. Using default interface." + RESET)
+            chosen_interface = active_interfaces[0]
+
     print(f"{GREEN}Current connected interface: {chosen_interface}{RESET}")
 
     if args.target:
