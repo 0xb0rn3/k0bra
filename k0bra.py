@@ -9,7 +9,12 @@ import signal
 import time
 import requests
 import nmap
+import logging
 from typing import List, Dict
+from concurrent.futures import ThreadPoolExecutor
+import tkinter as tk
+from tkinter import ttk
+import argparse
 
 # ANSI color codes
 RED = "\033[91m"
@@ -18,6 +23,9 @@ YELLOW = "\033[93m"
 BLUE = "\033[94m"
 CYAN = "\033[96m"
 RESET = "\033[0m"
+
+# Logging configuration
+logging.basicConfig(filename='k0bra.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def print_banner():
     print(CYAN + "    ██   ██  ██████  ██████  ██████   █████  ")
@@ -31,6 +39,7 @@ def print_banner():
 
 def handle_exit(signum, frame):
     """Handle clean exit on Ctrl + C."""
+    logging.info("Exiting gracefully... (Ctrl + C detected)")
     print(RED + "\nExiting gracefully... (Ctrl + C detected)" + RESET)
     sys.exit(0)
 
@@ -39,6 +48,7 @@ def is_masscan_installed() -> bool:
         subprocess.run(["masscan", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return True
     except FileNotFoundError:
+        logging.error("Masscan not found.")
         return False
 
 def install_masscan():
@@ -63,12 +73,13 @@ def get_ip_range(interface: str) -> str:
         ip_info = iface_info[netifaces.AF_INET]
         ip = ip_info[0]['addr']
         subnet_mask = ip_info[0]['netmask']
-        
+
         ip_parts = ip.split('.')
         mask_parts = subnet_mask.split('.')
         network_address = '.'.join(str(int(ip_parts[i]) & int(mask_parts[i])) for i in range(4))
         return f"{network_address}/24"
-    except KeyError:
+    except KeyError as e:
+        logging.error(f"Could not retrieve IP information for interface: {interface}. Error: {e}")
         print(RED + f"Could not retrieve IP information for interface: {interface}" + RESET)
         sys.exit(1)
 
@@ -83,7 +94,7 @@ def get_ip_mac_pairs(ip_range: str, timeout: int = 2) -> List[Dict[str, str]]:
     broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
     arp_request_broadcast = broadcast / arp_request
     answered_list = scapy.srp(arp_request_broadcast, timeout=timeout, verbose=False)[0]
-    
+
     devices = []
     for element in answered_list:
         device_info = {"IP": element[1].psrc, "MAC": element[1].hwsrc}
@@ -107,16 +118,17 @@ def masscan_scan(ip_range: str, port_range: str = "0-65535", rate: int = 50000) 
                     masscan_results[ip] = []
                 masscan_results[ip].append(port)
     except subprocess.CalledProcessError as e:
+        logging.error(f"Masscan failed: {e}")
         print(RED + f"Masscan failed: {e}" + RESET)
     return masscan_results
 
-def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=None, fragment=False, proxies=None, source_port=None, timing=3) -> Dict[str, List[int]]:
+def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=None, fragment=False, proxies=None, source_port=None, timing=3, scripts=None) -> Dict[str, List[int]]:
     nm = nmap.PortScanner()
     print(BLUE + f"Scanning using Nmap on range: {ip_range}" + RESET)
-    
+
     try:
         nmap_args = f'-p {port_range} -{scan_type} -T{timing}'
-        
+
         if decoy:
             nmap_args += f' -D {decoy}'
         if fragment:
@@ -125,9 +137,12 @@ def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=
             nmap_args += f' --proxies {proxies}'
         if source_port:
             nmap_args += f' -g {source_port}'
-        
+        if scripts:
+            nmap_args += f' --script {scripts}'
+
         nm.scan(hosts=ip_range, arguments=nmap_args)
     except Exception as e:
+        logging.error(f"Nmap scan failed: {e}")
         print(RED + f"Nmap scan failed: {e}" + RESET)
         return {}
 
@@ -137,22 +152,26 @@ def nmap_scan(ip_range: str, port_range: str = "1-65535", scan_type="sS", decoy=
             open_ports = [port for port in nm[host]['tcp'] if nm[host]['tcp'][port]['state'] == 'open']
             nmap_results[host] = open_ports
             print(f"{GREEN}Found open ports on {host}: {open_ports}{RESET}")
-    
+
     return nmap_results
 
 def scan_all_ports(devices: List[Dict[str, str]], port_range: str = "0-65535", scan_tool: str = "masscan") -> Dict[str, List[int]]:
     results = {}
     ip_range = ','.join(device['IP'] for device in devices)
-    if scan_tool == "masscan":
-        print(BLUE + f"Using Masscan to scan range: {ip_range}" + RESET)
-        masscan_results = masscan_scan(ip_range, port_range=port_range)
-        
-        for device in devices:
-            ip = device['IP']
-            if ip in masscan_results:
-                results[ip] = masscan_results[ip]
-    elif scan_tool == "nmap":
-        results = nmap_scan(ip_range, port_range)
+
+    with ThreadPoolExecutor() as executor:
+        if scan_tool == "masscan":
+            print(BLUE + f"Using Masscan to scan range: {ip_range}" + RESET)
+            future = executor.submit(masscan_scan, ip_range, port_range)
+            masscan_results = future.result()
+
+            for device in devices:
+                ip = device['IP']
+                if ip in masscan_results:
+                    results[ip] = masscan_results[ip]
+        elif scan_tool == "nmap":
+            future = executor.submit(nmap_scan, ip_range, port_range)
+            results = future.result()
 
     return results
 
@@ -169,7 +188,56 @@ def save_results_to_csv(devices: List[Dict[str, str]], open_ports: Dict[str, Lis
 
     print(GREEN + f"Results saved to {output_file}" + RESET)
 
-def main():
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="k0bra - The Network Scavenger")
+    parser.add_argument('--interface', type=str, help='Network interface to use')
+    parser.add_argument('--ip-range', type=str, help='IP range to scan')
+    parser.add_argument('--timeout', type=int, default=2, help='Timeout for ARP scan in seconds')
+    parser.add_argument('--scan-tool', choices=['masscan', 'nmap'], default='masscan', help='Scanning tool to use')
+    parser.add_argument('--output', type=str, default='results.csv', help='Output CSV file name')
+    parser.add_argument('--target', type=str, help='Custom target IP range to scan')
+    return parser.parse_args()
+
+def create_gui():
+    root = tk.Tk()
+    root.title("k0bra - The Network Scavenger")
+
+    frame = ttk.Frame(root, padding="10")
+    frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+    ttk.Label(frame, text="Network Interface:").grid(row=0, column=0, sticky=tk.W)
+    interface_var = tk.StringVar()
+    interface_entry = ttk.Entry(frame, textvariable=interface_var)
+    interface_entry.grid(row=0, column=1, sticky=(tk.W, tk.E))
+
+    ttk.Label(frame, text="IP Range:").grid(row=1, column=0, sticky=tk.W)
+    ip_range_var = tk.StringVar()
+    ip_range_entry = ttk.Entry(frame, textvariable=ip_range_var)
+    ip_range_entry.grid(row=1, column=1, sticky=(tk.W, tk.E))
+
+    ttk.Label(frame, text="Custom Target:").grid(row=2, column=0, sticky=tk.W)
+    target_var = tk.StringVar()
+    target_entry = ttk.Entry(frame, textvariable=target_var)
+    target_entry.grid(row=2, column=1, sticky=(tk.W, tk.E))
+
+    ttk.Label(frame, text="Scan Tool:").grid(row=3, column=0, sticky=tk.W)
+    scan_tool_var = tk.StringVar(value="masscan")
+    ttk.Radiobutton(frame, text="Masscan", variable=scan_tool_var, value="masscan").grid(row=3, column=1, sticky=tk.W)
+    ttk.Radiobutton(frame, text="Nmap", variable=scan_tool_var, value="nmap").grid(row=4, column=1, sticky=tk.W)
+
+    ttk.Button(frame, text="Start Scan", command=lambda: start_scan(interface_var.get(), ip_range_var.get(), scan_tool_var.get(), target_var.get())).grid(row=5, column=1, sticky=tk.E)
+
+    root.mainloop()
+
+def start_scan(interface, ip_range, scan_tool, target):
+    # Implement the scan logic here
+    args = argparse.Namespace(interface=interface, ip_range=ip_range, scan_tool=scan_tool, output='results.csv', target=target)
+    main(args)
+
+def main(args=None):
+    if args is None:
+        args = parse_arguments()
+
     # Handle Ctrl+C for clean exit
     signal.signal(signal.SIGINT, handle_exit)
 
@@ -185,28 +253,15 @@ def main():
         print(RED + "No active network interfaces found." + RESET)
         sys.exit(1)
 
-    current_interface = active_interfaces[0]
-    print(f"{GREEN}Current connected interface: {current_interface}{RESET}")
-    
-    print("Other active network interfaces:")
-    for i, iface in enumerate(active_interfaces):
-        if iface != current_interface:
-            print(f"  {i + 1}. {iface}")
+    chosen_interface = args.interface if args.interface else active_interfaces[0]
+    print(f"{GREEN}Current connected interface: {chosen_interface}{RESET}")
 
-    iface_choice = input(f"Enter the number of the network interface you want to use (default is {current_interface}): ")
-    chosen_interface = current_interface
-    if iface_choice.isdigit() and 0 < int(iface_choice) <= len(active_interfaces):
-        chosen_interface = active_interfaces[int(iface_choice) - 1]
+    if args.target:
+        ip_range = args.target
+    else:
+        ip_range = args.ip_range if args.ip_range else get_ip_range(chosen_interface)
 
-    gateway = get_gateway(chosen_interface)
-    print(f"{CYAN}Gateway for interface {chosen_interface}: {gateway}{RESET}")
-
-    ip_range = input(f"Enter the IP range to scan (default is calculated from your interface): ").strip()
-    if not ip_range:
-        ip_range = get_ip_range(chosen_interface)
-    
-    timeout = input("Enter timeout for ARP scan in seconds (default is 2): ").strip()
-    timeout = int(timeout) if timeout.isdigit() else 2
+    timeout = args.timeout
 
     devices = get_ip_mac_pairs(ip_range, timeout=timeout)
 
@@ -214,15 +269,8 @@ def main():
         print(RED + "No devices found." + RESET)
         return
 
-    scan_tool = input("Choose scanning tool (1 for Masscan, 2 for Nmap, default is Masscan): ").strip()
-    if not scan_tool or scan_tool == '1':
-        open_ports = scan_all_ports(devices, scan_tool='masscan')
-    elif scan_tool == '2':
-        open_ports = scan_all_ports(devices, scan_tool='nmap')
-    
-    output_file = input("Enter output CSV file name (default is results.csv): ").strip()
-    if not output_file:
-        output_file = 'results.csv'
+    open_ports = scan_all_ports(devices, scan_tool=args.scan_tool)
+    output_file = args.output
 
     save_results_to_csv(devices, open_ports, output_file)
 
