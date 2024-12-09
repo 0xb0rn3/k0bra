@@ -9,7 +9,8 @@ import asyncio
 import json
 import csv
 import re
-from jsonschema import validate, ValidationError
+from jsonschema import validate, ValidationError, RefResolver, Draft7Validator
+from jsonschema.exceptions import RefResolutionError
 from typing import List, Dict
 
 # ANSI color codes
@@ -93,12 +94,17 @@ def fetch_cve_data():
 def validate_cve_data(cve_data):
     """Validates the fetched CVE data against the provided schema."""
     valid_cves = []
+    resolver = RefResolver(base_uri=f"file://{BASE_DIR}/", referrer=CVE_SCHEMA)
+    validator = Draft7Validator(CVE_SCHEMA, resolver=resolver)
+
     for cve in cve_data:
         try:
-            validate(instance=cve, schema=CVE_SCHEMA)
+            validator.validate(cve)
             valid_cves.append(cve)
         except ValidationError as e:
             print(f"{YELLOW}Invalid CVE format for {cve.get('id', 'Unknown')}: {e}{RESET}")
+        except RefResolutionError as e:
+            print(f"{RED}Reference resolution error: {e}{RESET}")
     return valid_cves
 
 # Display CVE details
