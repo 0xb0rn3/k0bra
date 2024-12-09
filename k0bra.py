@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import sqlite3
 import logging
 import scapy.all as scapy
@@ -22,9 +23,17 @@ RESET = "\033[0m"
 # Logging configuration
 logging.basicConfig(filename='k0bra.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Load the CVE JSON schema (replace '/path/to/schema.json' with the actual path to your schema file)
-with open('/mnt/data/CVE_Record_Format.json', 'r') as schema_file:
-    CVE_SCHEMA = json.load(schema_file)
+# Locate the CVE schema file in the script's directory
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CVE_SCHEMA_PATH = os.path.join(BASE_DIR, 'CVE_Record_Format.json')
+
+# Load the CVE JSON schema
+try:
+    with open(CVE_SCHEMA_PATH, 'r') as schema_file:
+        CVE_SCHEMA = json.load(schema_file)
+except FileNotFoundError:
+    print(f"{RED}Error: CVE schema file not found at {CVE_SCHEMA_PATH}. Ensure the file exists.{RESET}")
+    exit(1)
 
 # Metasploit module mapping
 METASPLOIT_MODULES = {
