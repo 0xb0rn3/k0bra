@@ -2,14 +2,13 @@
 import sqlite3
 import logging
 import scapy.all as scapy
-import nmap
-import plotly.graph_objects as go
 import requests
 import subprocess
 import asyncio
 import json
 import csv
 import re
+from jsonschema import validate, ValidationError
 from typing import List, Dict
 
 # ANSI color codes
@@ -22,6 +21,10 @@ RESET = "\033[0m"
 
 # Logging configuration
 logging.basicConfig(filename='k0bra.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Load the CVE JSON schema (replace '/path/to/schema.json' with the actual path to your schema file)
+with open('/mnt/data/CVE_Record_Format.json', 'r') as schema_file:
+    CVE_SCHEMA = json.load(schema_file)
 
 # Metasploit module mapping
 METASPLOIT_MODULES = {
@@ -41,32 +44,6 @@ METASPLOIT_MODULES = {
         "CVE-2021-0938": "exploit/android/local/put_user_vroot",
     },
 }
-
-# Fetch CVE data from CIRCL API
-def fetch_cve_data():
-    """Fetches the latest CVE details from the CIRCL API."""
-    url = "https://cve.circl.lu/api/last"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        cve_data = response.json()
-        return cve_data
-    except requests.exceptions.RequestException as e:
-        print(f"{RED}Error fetching CVE data: {e}{RESET}")
-        return None
-
-# Function to display CVE details
-def display_cve_data(cve_data):
-    """Displays fetched CVE data."""
-    if cve_data:
-        print(GREEN + "Latest CVEs:" + RESET)
-        for cve in cve_data:
-            print(f"{CYAN}CVE ID: {cve['id']}{RESET}")
-            print(f"{YELLOW}Description: {cve['summary']}{RESET}")
-            print(f"{RED}Published Date: {cve['Published']}{RESET}")
-            print(f"{YELLOW}CVSS Score: {cve['cvss']}\n{RESET}")
-    else:
-        print(RED + "No CVE data available." + RESET)
 
 def print_banner():
     """Prints the banner for the tool."""
@@ -90,107 +67,72 @@ def get_user_input():
         return get_user_input()  # Retry if invalid
     return target_network
 
-def get_cve_input():
-    """Input function for the path to a local CVE JSON file."""
-    print("Please provide the path to the CVE JSON file (e.g., /path/to/cve_database.json):")
-    cve_file_path = input().strip()
-    
-    # Validate file path
-    if not cve_file_path.endswith(".json"):
-        print(RED + "Invalid file type. Please provide a valid JSON file." + RESET)
-        return get_cve_input()  # Retry if invalid
-    return cve_file_path
+# Fetch CVE data dynamically from CIRCL API
+def fetch_cve_data():
+    """Fetches the latest CVE details from the CIRCL API."""
+    url = "https://cve.circl.lu/api/last"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        cve_data = response.json()
+        return cve_data
+    except requests.exceptions.RequestException as e:
+        print(f"{RED}Error fetching CVE data: {e}{RESET}")
+        return None
 
-class NetworkSecurityTool:
-    def __init__(self, target_network):
-        """Initialize the security mapping tool."""
-        self.target = target_network
-        self.vulnerabilities = []
-        self.network_map = {}
-        self.db_connection = self._initialize_database()
-        self.logger = self._setup_logging()
-
-    def _initialize_database(self):
-        """Create local SQLite database for vulnerability tracking."""
+# Validate CVE data against the provided schema
+def validate_cve_data(cve_data):
+    """Validates the fetched CVE data against the provided schema."""
+    valid_cves = []
+    for cve in cve_data:
         try:
-            conn = sqlite3.connect('security_map.db')
-            cursor = conn.cursor()
-            cursor.execute('''CREATE TABLE IF NOT EXISTS vulnerabilities
-                              (ip TEXT, mac TEXT, port INTEGER, vulnerability TEXT, risk_score INTEGER)''')
-            conn.commit()
-            return conn
-        except sqlite3.Error as e:
-            self.logger.error(f"Database connection failed: {e}")
-            print(RED + "Database connection failed. Check logs for details." + RESET)
-            exit(1)
+            validate(instance=cve, schema=CVE_SCHEMA)
+            valid_cves.append(cve)
+        except ValidationError as e:
+            print(f"{YELLOW}Invalid CVE format for {cve.get('id', 'Unknown')}: {e}{RESET}")
+    return valid_cves
 
-    def _setup_logging(self):
-        """Configure logging with rotation."""
-        logger = logging.getLogger('NetworkSecurityTool')
-        handler = logging.FileHandler('tool.log')
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
-        return logger
-
-    def save_report(self, network_info, open_ports, vulnerabilities):
-        """Generate a CSV report for the scan results."""
-        try:
-            with open('scan_report.csv', mode='w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(['IP Address', 'Open Ports', 'Vulnerabilities', 'Risk Score'])
-                for ip, ports in open_ports.items():
-                    vulnerability_list = []
-                    risk_score = 'None'
-                    for vulnerability in vulnerabilities.get(ip, []):
-                        vulnerability_list.append(vulnerability[0])
-                        risk_score = vulnerability[1]  # Assuming first vulnerability is most critical
-                    writer.writerow([ip, ', '.join(map(str, ports)), ', '.join(vulnerability_list), risk_score])
-            print(GREEN + "Scan report saved as scan_report.csv" + RESET)
-        except Exception as e:
-            self.logger.error(f"Error saving scan report: {e}")
-            print(RED + "Failed to save scan report. Check logs for details." + RESET)
-
-def metasploit_exploit(target_ip, target_port, service, cve_id):
-    """Automatically run Metasploit module based on service and CVE."""
-    if service in METASPLOIT_MODULES and cve_id in METASPLOIT_MODULES[service]:
-        module = METASPLOIT_MODULES[service][cve_id]
-        try:
-            command = f"msfconsole -x 'use {module}; set RHOSTS {target_ip}; set RPORT {target_port}; exploit'"
-            print(YELLOW + f"Running Metasploit module for {service} ({cve_id}): {module}" + RESET)
-            subprocess.run(command, shell=True, check=True)
-        except subprocess.CalledProcessError as e:
-            print(RED + f"Metasploit exploit failed: {str(e)}" + RESET)
-        except FileNotFoundError:
-            print(RED + "Metasploit not found. Ensure it's installed and accessible." + RESET)
+# Display CVE details
+def display_cve_data(cve_data):
+    """Displays validated CVE data."""
+    if cve_data:
+        print(GREEN + "Validated CVEs:" + RESET)
+        for cve in cve_data:
+            print(f"{CYAN}CVE ID: {cve['id']}{RESET}")
+            print(f"{YELLOW}Description: {cve['summary']}{RESET}")
+            print(f"{RED}Published Date: {cve['Published']}{RESET}")
+            print(f"{YELLOW}CVSS Score: {cve['cvss']}\n{RESET}")
     else:
-        print(RED + f"No Metasploit module found for {service} and CVE {cve_id}" + RESET)
+        print(RED + "No valid CVE data available." + RESET)
 
-# Async main function
+# Function to save validated CVE data
+def save_cve_data_to_file(cve_data):
+    """Saves validated CVE data to a file."""
+    try:
+        with open('validated_cves.json', 'w') as f:
+            json.dump(cve_data, f, indent=4)
+        print(GREEN + "Validated CVE data saved to validated_cves.json" + RESET)
+    except Exception as e:
+        print(f"{RED}Error saving CVE data to file: {e}{RESET}")
+
+# Main function to integrate CVE fetching and schema validation
 async def main():
-    # Get user inputs for network and CVE file
-    target_network = get_user_input()  # Get target network from user input
-    cve_file_path = get_cve_input()  # Get CVE JSON file path from user input
+    print_banner()
 
-    # Initialize the security tool
-    tool = NetworkSecurityTool(target_network)
+    # Get user input for target network
+    target_network = get_user_input()
 
-    # Fetch and display the latest CVEs
-    cve_data = fetch_cve_data()  # Fetch latest CVE data
-    display_cve_data(cve_data)   # Display the fetched CVE data
+    # Fetch and validate CVE data
+    cve_data = fetch_cve_data()
+    if cve_data:
+        validated_cves = validate_cve_data(cve_data)
+        display_cve_data(validated_cves)
+        save_cve_data_to_file(validated_cves)
+    else:
+        print(RED + "No CVE data fetched. Skipping vulnerability mapping." + RESET)
 
-    # Perform scan and get results (example)
-    network_info = {}  # Example: {'192.168.1.1': 'active'}
-    open_ports = {"192.168.1.1": [22, 80, 443]}  # Example: IP with open ports
-    vulnerabilities = {"192.168.1.1": [("CVE-2021-34527", 9)]}  # Example vulnerabilities
-    tool.save_report(network_info, open_ports, vulnerabilities)  # Save report as CSV
+    # Placeholder for further scanning and exploitation logic
+    print(GREEN + "Scanning and exploitation functionality can proceed here." + RESET)
 
-    # Trigger Metasploit exploit based on found vulnerabilities
-    for ip, vulns in vulnerabilities.items():
-        for cve, risk in vulns:
-            metasploit_exploit(ip, 443, "HTTP", cve)  # Example for HTTP service with CVE-2021-34527
-
-# Run the main function
 if __name__ == "__main__":
     asyncio.run(main())
