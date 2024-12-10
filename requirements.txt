@@ -1,6 +1,34 @@
-scapy
-netifaces
-tabulate
-requests
-time
-nmap
+# Standard Library
+import os
+import sqlite3
+import logging
+import asyncio
+import json
+import csv
+import re
+import ipaddress
+import socket
+import concurrent.futures
+from datetime import datetime, timedelta
+import random
+import functools
+import time
+from typing import List, Dict, Optional, Tuple
+
+# Third-party Libraries
+import scapy.all as scapy
+import requests
+import nmap
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from jsonschema import validate, ValidationError, RefResolver, Draft7Validator
+from jsonschema.exceptions import RefResolutionError
+
+# Progress Bar Utility
+import tqdm
+
+# Disk-based Caching
+import diskcache
