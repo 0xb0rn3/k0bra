@@ -1,104 +1,113 @@
-## k0bra - The Network Scavenger
+# K0bra Network Scanner 🌐🔍
 
-k0bra is a powerful and versatile network security tool designed for vulnerability assessments and penetration testing. Developed by b0urn3, this tool is equipped with capabilities for scanning network devices, discovering open ports, fetching CVEs, and automating Metasploit exploits based on discovered vulnerabilities. It also stores results in a local database and generates detailed CSV reports.
+## Overview
 
-## Features
+K0bra is an advanced, multi-purpose network scanning tool designed for comprehensive network reconnaissance and host discovery. Built with Python and leveraging powerful async networking libraries, K0bra provides robust network scanning capabilities with flexible output formats and advanced discovery techniques.
 
-- Network Scanning: Automatically scans for active devices within a specified IP range and maps their MAC addresses and open ports.
-- CVE Fetching: Retrieves CVE details from the CIRCL API to stay up-to-date with the latest security vulnerabilities.
-- Metasploit Integration: Automatically runs Metasploit exploit modules based on discovered vulnerabilities.
-- Local Database: Stores scan results in an SQLite database for tracking and future analysis.
-- Logging: Logs detailed information about scans, vulnerabilities, and any issues to ensure a clear and auditable record.
-- CSV Report Generation: Generates a detailed CSV report summarizing network information, open ports, discovered vulnerabilities, and associated risk scores.
+## 🚀 Features
 
-## Installation
+### Host Discovery
+- **ARP Network Scanning**: Efficiently identifies live hosts on a network
+- **DNS Hostname Resolution**: Attempts to resolve hostnames for discovered IP addresses
+- **Concurrent Discovery**: Utilizes asyncio for high-performance scanning
 
-Before running k0bra, ensure you have the following dependencies installed:
+### Port Scanning
+- **TCP Connection Scanning**: Identifies open ports on discovered hosts
+- **Service Detection**: Recognizes common services based on port numbers
+- **Configurable Port List**: Supports custom port specification
+- **Parallel Scanning**: Concurrent port scanning for maximum efficiency
 
-- Python 3.x
-- requests library
-- scapy library
-- nmap tool
-- Metasploit Framework (for Metasploit exploits)
-- SQLite (for storing results)
-## Step 1: Clone the Repository Clone the repository to your local machine:
+### Output Formats
+- **Fancy**: Colorful, human-readable console output (default)
+- **JSON**: Structured, machine-readable format
+- **XML**: Standardized XML representation
+- **Plain Text**: Simple console output
 
+## 🔧 Requirements
+
+### System Requirements
+- Python 3.7+
+- Root/sudo privileges
+- Linux/macOS recommended
+
+### Python Dependencies
+- `scapy`
+- `termcolor` (optional, for enhanced color output)
+
+## 🛠 Installation
+
+1. Clone the repository:
+```bash
 git clone https://github.com/q4n0/k0bra.git
 cd k0bra
+```
 
-## Step 2: Install Dependencies
+2. Install required dependencies:
+```bash
+pip install scapy
+pip install termcolor  # Optional
+```
 
-Install the required Python dependencies using pip:
+## 🖥 Usage
 
-pip install -r requirements.txt
+### Basic Scan
+```bash
+sudo python3 k0bra.py 192.168.1.0/24
+```
 
-## Step 3: Install Metasploit
+### Advanced Usage
+```bash
+# Specify output format
+sudo python3 k0bra.py 192.168.1.0/24 -f json
 
-Make sure that Metasploit is installed on your system. You can follow the official Metasploit installation guide: Metasploit Installation
+# Customize worker count
+sudo python3 k0bra.py 192.168.1.0/24 -w 100
 
-## Step 4: Set Permissions
+# Enable verbose logging
+sudo python3 k0bra.py 192.168.1.0/24 -v
+```
 
-Ensure you have the required permissions to run network scans (may need root/administrator privileges for certain scans).
+### Command-Line Options
+- `network`: Network CIDR to scan (required)
+- `-f, --format`: Output format (fancy/json/xml/text, default: fancy)
+- `-w, --workers`: Maximum concurrent workers (default: 50)
+- `-v, --verbose`: Enable detailed logging
 
-## Usage
+## 📋 Output Examples
 
-## 1. Run the Tool
+### Fancy Output (Default)
+- Colorful console display
+- Emoji-enhanced readability
+- Sorted host information
+- Network scan summary statistics
 
-To run the tool, simply execute the Python script:
+### JSON Output
+- Structured data suitable for programmatic processing
+- Includes IP, MAC, hostname, and port details
 
-python3 k0bra.py
+## ⚠️ Legal and Ethical Use
 
-You will be prompted to enter the target network or IP range (e.g., 192.168.1.0/24), and the path to the CVE JSON file. Alternatively, the tool can fetch the latest CVE details automatically from the CIRCL API.
+K0bra is intended for network administrators and security professionals to assess and manage their own networks. Always obtain proper authorization before scanning networks you do not own or manage.
 
-## 2. Network Scan
+## 🤝 Contributing
 
-- The tool will scan the provided target network and display discovered devices with their associated IP and MAC addresses.
-- It will also check for open ports (TCP/UDP) on each device.
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-## 3. Vulnerability Assessment
+## 📜 License
 
-- The script will compare the discovered services with known vulnerabilities (CVEs) from the CVE data source.
-- The tool will suggest exploits based on the discovered vulnerabilities and automatically run Metasploit modules if available.
+Distributed under the MIT License. See `LICENSE` for more information.
 
-## 4. Report Generation
+## 👥 Contact
 
-Once the scan is complete, a CSV report (scan_report.csv) will be generated with the following columns:
-- IP Address
-- Open Ports
-- Vulnerabilities
-- Risk Score
+Project Developer: q4n0
+- GitHub: [@q4n0](https://github.com/q4n0)
+- Instagram: [@onlybyhive](https://instagram.com/onlybyhive)
 
-## 5. Logs
+## 🙏 Acknowledgments
 
-All actions and errors are logged in tool.log for auditing and troubleshooting.
-
-Example Output
-
-Please provide the target network or IP range (e.g., 192.168.1.0/24):
-192.168.1.0/24
-
-Please provide the path to the CVE JSON file (e.g., /path/to/cve_database.json):
-/path/to/cve_database.json
-
-Running network scan on 192.168.1.0/24...
-Found device 192.168.1.1 with MAC address 00:1B:2A:3C:4D:5E
-Open Ports: TCP: [80, 443], UDP: [53]
-Checking for vulnerabilities...
-
-Running Metasploit exploit for CVE-2017-0143 on 192.168.1.1...
-
-Scan report saved as scan_report.csv
-
-## Contribution
-
-Feel free to fork the repository, submit issues, or create pull requests with bug fixes or improvements.
-
-## Contact
-
-- Developer: b0urn3
-- Email: b0urn3@proton.me
-- Instagram: @onlybyhive
-
-## Disclaimer
-
-This tool is intended for educational and authorized penetration testing use only. Always ensure you have explicit permission before performing any network scanning or exploitation on a network or system.
+- [Scapy](https://scapy.net/) for powerful network packet manipulation
+- [Python Asyncio](https://docs.python.org/3/library/asyncio.html) for concurrent networking
