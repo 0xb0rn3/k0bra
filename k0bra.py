@@ -1,183 +1,383 @@
 #!/usr/bin/env python3
-import os
-import sqlite3
-import logging
 import asyncio
-import json
-import csv
-import re
+import os
 import ipaddress
+import json
 import socket
-import concurrent.futures
-from datetime import datetime, timedelta
-import random
+import termcolor
+import sys
+import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, asdict
+from scapy.all import ARP, Ether, srp, IP, TCP, sr1
+from typing import List, Dict, Optional, Any
+ 
+#color support
+try:
+    from termcolor import colored
+    HAVE_COLOR = True
+except ImportError:
+    HAVE_COLOR = False
+    def colored(text, color=None, attrs=None):
+        return text
 
-import scapy.all as scapy
-import requests
-import nmap
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from jsonschema import validate, ValidationError, RefResolver, Draft7Validator
-from jsonschema.exceptions import RefResolutionError
-from typing import List, Dict, Optional, Tuple
-
-# Configure Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('k0bra.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# ANSI Color Codes
-class Colors:
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    CYAN = "\033[96m"
-    MAGENTA = "\033[95m"
-    WHITE = "\033[97m"
-    RESET = "\033[0m"
-
-    @classmethod
-    def colorize(cls, text, color):
-        return f"{color}{text}{cls.RESET}"
-
-# Banner
-def print_banner():
-    """Print tool banner."""
-    banner = f"""
-{Colors.CYAN}
-    ██   ██  ██████  ██████  ██████  ██████  ███████  ███████  ███████  
-    ██  ██  ██  ████ ██   ██ ██   ██ ██   ██ ██   ██ ██   ██ 
-    █████   ██ ██ ██ ██████  ██████  ███████  ████████  ████████  
-    ██  ██  ████ ██   ██ ██   ██ ██   ██ ██   ██ ██   ██ 
-    ██   ██  ██████  ██████  ███████  ████████  ████████  ████████  
-{Colors.GREEN}Welcome to k0bra - The Advanced Network Vulnerability Scanner
-Developed by: b0urn3
-GitHub: https://github.com/q4n0
-Contact: Email: b0urn3@proton.me | Instagram: onlybyhive
-{Colors.RESET}
+class K0braNetworkScanner:
+    """
+         Advanced network scanning tool.
+    Developed by github.com/q4n0 (IG: onlybyhive)
+    """
+    
+    BANNER = r"""
+ _      ___   _                  
+| | __ / _ \ | |__   _ __   __ _ 
+| |/ /| | | || '_ \ | '__| / _` |
+|   < | |_| || |_) || |   | (_| |
+|_|\_\ \___/ |_.__/ |_|    \__,_|
+                                 
+K0BRA Network Scanner v0.1
+GitHub: https://github.com/q4n0/k0bra
+Developed by q4n0 Ig: onlybyhive
 """
-    print(banner)
-
-# Machine Learning Risk Predictor
-class RiskPredictor:
-    def __init__(self):
-        self.model = None
-        self.scaler = StandardScaler()
-
-    def prepare_training_data(self, historical_scans):
-        features = []
-        labels = []
-        for scan in historical_scans:
-            feature_vector = [
-                len(scan.get('open_ports', [])),
-                len(set(scan.get('services', {}).keys())),
-                len([s for s in scan.get('services', {}).values() if s['name'] == 'HTTP']),
-                len([s for s in scan.get('services', {}).values() if s['name'] == 'SSH']),
-                sum(len(banner) for banner in scan.get('service_banners', [])),
-                len(scan.get('vulnerabilities', []))
-            ]
-            features.append(feature_vector)
-            labels.append(scan.get('risk_label', 0))
-
-        X = self.scaler.fit_transform(features)
-        X_train, X_test, y_train, y_test = train_test_split(X, labels, test_size=0.2)
-        self.model = RandomForestClassifier(n_estimators=100)
-        self.model.fit(X_train, y_train)
-
-    def predict_network_risk(self, network_scan):
-        if not self.model:
-            return 0.5
-        feature_vector = [
-            len(network_scan.get('open_ports', [])),
-            len(set(network_scan.get('services', {}).keys())),
-            len([s for s in network_scan.get('services', {}).values() if s['name'] == 'HTTP']),
-            len([s for s in network_scan.get('services', {}).values() if s['name'] == 'SSH']),
-            sum(len(banner) for banner in network_scan.get('service_banners', [])),
-            len(network_scan.get('vulnerabilities', []))
-        ]
-        scaled_features = self.scaler.transform([feature_vector])
-        risk_prediction = self.model.predict_proba(scaled_features)[0][1]
-        return risk_prediction
-
-# Vulnerability Database
-class VulnerabilityDatabase:
-    def __init__(self):
-        self.sources = {
-            'CIRCL': 'https://cve.circl.lu/api/last',
-            'NVD': 'https://services.nvd.nist.gov/rest/json/cves/2.0',
-        }
-        self.service_port_mapping = {
-            21: 'FTP', 22: 'SSH', 80: 'HTTP', 443: 'HTTPS', 445: 'SMB', 3306: 'MySQL', 3389: 'RDP'
-        }
-
-    def fetch_vulnerabilities(self):
-        all_vulnerabilities = []
-        for source, url in self.sources.items():
+    
+    def __init__(
+        self, 
+        network: str, 
+        output_format: str = 'fancy', 
+        max_workers: int = 50,
+        verbose: bool = False
+    ):
+        """
+        Initialize K0bra Network Scanner with advanced configuration.
+        
+        :param network: Network CIDR (e.g., '192.168.1.0/24')
+        :param output_format: Output format ('fancy', 'json', 'xml', 'text')
+        :param max_workers: Maximum concurrent workers for scanning
+        :param verbose: Enable detailed logging
+        """
+        try:
+            self.network = ipaddress.ip_network(network, strict=False)
+        except ValueError as e:
+            print(f"[ERROR] Invalid network format: {e}")
+            sys.exit(1)
+        
+        self.output_format = output_format
+        self.max_workers = max_workers
+        self.verbose = verbose
+    
+    @dataclass
+    class HostResult:
+        """Structured result for each discovered host."""
+        ip: str
+        mac: Optional[str] = None
+        hostname: Optional[str] = None
+        ports: List[Dict[str, Any]] = None
+        services: List[Dict[str, str]] = None
+    
+    async def arp_scan(self) -> List[HostResult]:
+        """
+        Perform ARP network discovery to identify live hosts.
+        
+        :return: List of discovered hosts
+        """
+        discovered_hosts = []
+        
+        try:
+            # Create ARP request packet
+            arp_request = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=str(self.network))
+            
+            # Send and receive ARP requests
+            result = srp(arp_request, timeout=2, verbose=False)[0]
+            
+            for sent, received in result:
+                host = self.HostResult(
+                    ip=received[ARP].psrc,
+                    mac=received[Ether].src
+                )
+                discovered_hosts.append(host)
+            
+            if self.verbose:
+                print(f"[INFO] Discovered {len(discovered_hosts)} hosts")
+        
+        except Exception as e:
+            print(f"[ERROR] ARP scan failed: {e}")
+        
+        return discovered_hosts
+    
+    async def dns_resolution(self, ip_address: str) -> Optional[str]:
+        """
+        Attempt to resolve hostname for an IP address.
+        
+        :param ip_address: IP to resolve
+        :return: Hostname if resolvable
+        """
+        try:
+            return socket.gethostbyaddr(ip_address)[0]
+        except (socket.herror, socket.gaierror):
+            return None
+    
+    async def port_scan(
+        self, 
+        target: str, 
+        ports: List[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform comprehensive port scanning.
+        
+        :param target: Target IP address
+        :param ports: List of ports to scan
+        :return: List of open ports with details
+        """
+        if ports is None:
+            ports = [21, 22, 23, 25, 53, 80, 110, 443, 445, 3306, 3389]
+        
+        open_ports = []
+        
+        async def scan_single_port(port):
             try:
-                response = requests.get(url, timeout=15, verify=False)
-                response.raise_for_status()
-                all_vulnerabilities.extend(self._parse_vulnerabilities(response.json()))
-            except Exception as e:
-                logger.warning(f"Failed to fetch from {source}: {e}")
-        return {v['id']: v for v in all_vulnerabilities}.values()
+                # Create TCP connection with timeout
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(target, port), 
+                    timeout=1
+                )
+                writer.close()
+                await writer.wait_closed()
+                
+                service = self._detect_service(port)
+                return {
+                    'port': port,
+                    'state': 'open',
+                    'service': service
+                }
+            except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+                return None
+        
+        # Use asyncio.gather for concurrent scanning
+        port_tasks = [scan_single_port(port) for port in ports]
+        results = await asyncio.gather(*port_tasks)
+        
+        # Filter out None results (closed ports)
+        open_ports = [result for result in results if result is not None]
+        
+        return open_ports
+    
+    def _detect_service(self, port: int) -> str:
+        """
+        Basic service detection based on common port numbers.
+        """
+        services = {
+            21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP',
+            53: 'DNS', 80: 'HTTP', 110: 'POP3', 
+            443: 'HTTPS', 445: 'SMB', 3306: 'MySQL', 
+            3389: 'RDP'
+        }
+        return services.get(port, 'Unknown')
+    
+    async def comprehensive_scan(self) -> List[HostResult]:
+        """
+        Perform comprehensive network scan with error handling.
+        
+        :return: Detailed scan results
+        """
+        try:
+            discovered_hosts = await self.arp_scan()
+            
+            async def enrich_host(host):
+                try:
+                    # Resolve hostname
+                    host.hostname = await self.dns_resolution(host.ip)
+                    
+                    # Perform port scan
+                    host.ports = await self.port_scan(host.ip)
+                    
+                    return host
+                except Exception as e:
+                    if self.verbose:
+                        print(f"[WARNING] Could not fully scan {host.ip}: {e}")
+                    return host
+            
+            # Concurrently enrich host information
+            enriched_hosts = await asyncio.gather(
+                *[enrich_host(host) for host in discovered_hosts]
+            )
+            
+            return enriched_hosts
+        
+        except Exception as e:
+            print(f"[CRITICAL] Scan failed: {e}")
+            return []
+    
+    def _fancy_format_output(self, results: List[HostResult]) -> str:
+        """
+        Create a visually appealing formatted output for network scan results.
+        
+        :param results: Scan results
+        :return: Formatted output string
+        """
+        # Network overview
+        output = [
+            colored("🌐 K0BRA Network Scan Results", "cyan", attrs=['bold']),
+            colored("=" * 50, "cyan")
+        ]
+        
+        # Summary statistics
+        total_hosts = len(results)
+        hosts_with_ports = sum(1 for host in results if host.ports)
+        
+        output.extend([
+            colored(f"📊 Total Hosts Discovered: {total_hosts}", "green"),
+            colored(f"🔍 Hosts with Open Ports: {hosts_with_ports}", "yellow"),
+            colored("=" * 50, "cyan"), ""
+        ])
+        
+        # Detailed host information
+        for host in sorted(results, key=lambda x: ipaddress.ip_address(x.ip)):
+            # Host header
+            host_header = f"🖥️  Host: {colored(host.ip, 'blue', attrs=['bold'])}"
+            if host.hostname:
+                host_header += f" ({colored(host.hostname, 'green')})"
+            output.append(host_header)
+            
+            # MAC address
+            if host.mac:
+                output.append(f"   MAC: {colored(host.mac, 'magenta')}")
+            
+            # Port information
+            if host.ports:
+                output.append(colored("   Open Ports:", "yellow"))
+                for port in host.ports:
+                    port_info = (
+                        f"     • {colored(str(port['port']), 'red')} "
+                        f"({colored(port['service'], 'green')}) "
+                        f"- {colored('OPEN', 'green', attrs=['bold'])}"
+                    )
+                    output.append(port_info)
+            else:
+                output.append(colored("   No open ports detected", "grey"))
+            
+            output.append("")  # Blank line between hosts
+        
+        return "\n".join(output)
+    
+    def export_results(
+        self, 
+        results: List[HostResult]
+    ) -> str:
+        """
+        Export scan results in specified format with improved readability.
+        
+        :param results: Scan results
+        :return: Formatted output string
+        """
+        # Convert results to dictionary for serialization
+        formatted_results = [
+            {k: v for k, v in asdict(result).items() if v is not None} 
+            for result in results
+        ]
+        
+        if self.output_format == 'fancy':
+            return self._fancy_format_output(results)
+        
+        elif self.output_format == 'json':
+            return json.dumps(formatted_results, indent=2)
+        
+        elif self.output_format == 'xml':
+            root = ET.Element('network_scan')
+            for host in formatted_results:
+                host_elem = ET.SubElement(root, 'host')
+                for key, value in host.items():
+                    ET.SubElement(host_elem, key).text = str(value)
+            
+            return ET.tostring(root, encoding='unicode')
+        
+        else:  # Plain text
+            output = []
+            for host in formatted_results:
+                output.append(f"IP: {host.get('ip', 'N/A')}")
+                output.append(f"MAC: {host.get('mac', 'N/A')}")
+                output.append(f"Hostname: {host.get('hostname', 'N/A')}")
+                
+                if 'ports' in host and host['ports']:
+                    output.append("Open Ports:")
+                    for port in host['ports']:
+                        output.append(
+                            f"  Port {port['port']} - {port['service']} "
+                            f"(State: {port['state']})"
+                        )
+                output.append("\n")
+            
+            return "\n".join(output)
+    
+    async def run(self) -> str:
+        """
+        Execute full network scan and return formatted results.
+        
+        :return: Scan results in specified output format
+        """
+        results = await self.comprehensive_scan()
+        return self.export_results(results)
 
-    def _parse_vulnerabilities(self, raw_data):
-        vulnerabilities = []
-        for item in raw_data.get('CVE_Items', []):
-            vulnerabilities.append({
-                'id': item.get('cve', {}).get('CVE_data_meta', {}).get('ID'),
-                'description': item.get('cve', {}).get('description', {}).get('description_data', [{}])[0].get('value'),
-                'severity': item.get('impact', {}).get('baseMetricV3', {}).get('cvssV3', {}).get('baseScore', 0.0),
-                'published_date': item.get('publishedDate'),
-            })
-        return vulnerabilities
-
-# Network Scanner
-class NetworkScanner:
-    def __init__(self, target_network):
-        self.target_network = target_network
-
-    def scan_network(self):
-        nm = nmap.PortScanner()
-        nm.scan(hosts=self.target_network, arguments='-sS -T4')
-        hosts = []
-        for host in nm.all_hosts():
-            if nm[host].state() == 'up':
-                hosts.append(host)
-        return hosts
-
-# Main Execution
-async def main():
-    print_banner()
-    target_network = input(f"{Colors.YELLOW}Enter target network (e.g., 192.168.1.0/24): {Colors.RESET}").strip()
-    vuln_db = VulnerabilityDatabase()
-    network_scanner = NetworkScanner(target_network)
-    risk_predictor = RiskPredictor()
-
-    # Fetch and aggregate vulnerabilities
-    vulnerabilities = vuln_db.fetch_vulnerabilities()
-
-    # Scan the network
-    hosts = network_scanner.scan_network()
-    print(f"{Colors.GREEN}Discovered Hosts: {hosts}{Colors.RESET}")
-
-    # Generate risk predictions
-    for host in hosts:
-        risk = risk_predictor.predict_network_risk({'open_ports': [80, 443], 'vulnerabilities': list(vulnerabilities)})
-        print(f"{Colors.BLUE}Host: {host} | Risk: {risk:.2f}{Colors.RESET}")
-
-    # Save report
-    with open('network_report.json', 'w') as f:
-        json.dump({'hosts': hosts, 'vulnerabilities': vulnerabilities}, f, indent=4)
-    print(f"{Colors.GREEN}Report saved as network_report.json{Colors.RESET}")
+def main():
+    """
+    Command-line interface for K0bra network scanner.
+    """
+    import argparse
+    
+    # Print banner
+    print(K0braNetworkScanner.BANNER)
+    
+    parser = argparse.ArgumentParser(
+        description='K0bra Comprehensive Network Scanner'
+    )
+    parser.add_argument(
+        'network', 
+        help='Network CIDR to scan (e.g., 192.168.1.0/24)'
+    )
+    parser.add_argument(
+        '-f', '--format', 
+        choices=['fancy', 'json', 'xml', 'text'], 
+        default='fancy', 
+        help='Output format (default: fancy)'
+    )
+    parser.add_argument(
+        '-w', '--workers', 
+        type=int, 
+        default=50, 
+        help='Maximum concurrent workers (default: 50)'
+    )
+    parser.add_argument(
+        '-v', '--verbose', 
+        action='store_true', 
+        help='Enable verbose logging'
+    )
+    
+    args = parser.parse_args()
+    
+    # Check for color support
+    if not HAVE_COLOR:
+        print("[WARNING] Install 'termcolor' for colored output")
+    
+    # Require root/sudo for network scanning
+    if not (hasattr(os, 'geteuid') and os.geteuid() == 0):
+        print("[ERROR] This tool requires root/sudo privileges")
+        sys.exit(1)
+    
+    try:
+        # Run scanner
+        scanner = K0braNetworkScanner(
+            args.network, 
+            output_format=args.format, 
+            max_workers=args.workers,
+            verbose=args.verbose
+        )
+        
+        # Run async event loop
+        results = asyncio.run(scanner.run())
+        print(results)
+    
+    except KeyboardInterrupt:
+        print("\n[INFO] Scan interrupted by user")
+    except Exception as e:
+        print(f"[CRITICAL] Unexpected error: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
