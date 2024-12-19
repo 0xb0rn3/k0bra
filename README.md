@@ -1,40 +1,59 @@
 # K0bra Network Scanner 🌐🔍
 
-## Overview
+A powerful and flexible network scanning tool that combines the speed of RustScan with the comprehensive features of traditional network scanners. This tool provides an intuitive menu-driven interface for network discovery, port scanning, and service detection.
 
-K0bra is an advanced, multi-purpose network scanning tool designed for comprehensive network reconnaissance and host discovery. Built with Python and leveraging powerful async networking libraries, K0bra provides robust network scanning capabilities with flexible output formats and advanced discovery techniques.
+## Features
 
-## 🚀 Features
+The Network Scanner brings together the best features of multiple scanning tools while adding new capabilities:
 
-### Host Discovery
-- **ARP Network Scanning**: Efficiently identifies live hosts on a network
-- **DNS Hostname Resolution**: Attempts to resolve hostnames for discovered IP addresses
-- **Concurrent Discovery**: Utilizes asyncio for high-performance scanning
+### Core Scanning Features
+- Advanced port scanning with configurable batch sizes and timeouts
+- Comprehensive service detection and banner grabbing
+- Multiple host discovery methods (ARP, ICMP, TCP)
+- Support for custom port ranges and specific port lists
+- Adaptive scanning with empty range skipping
+- Random and sequential port scanning modes
 
-### Port Scanning
-- **TCP Connection Scanning**: Identifies open ports on discovered hosts
-- **Service Detection**: Recognizes common services based on port numbers
-- **Configurable Port List**: Supports custom port specification
-- **Parallel Scanning**: Concurrent port scanning for maximum efficiency
+### Performance Optimizations
+- Concurrent scanning with configurable worker pools
+- Automatic resource limit management
+- Configurable retry mechanisms for improved accuracy
+- Rate limiting capabilities to avoid network saturation
+- Batch processing with dynamic sizing
 
-### Output Formats
-- **Fancy**: Colorful, human-readable console output (default)
-- **JSON**: Structured, machine-readable format
-- **XML**: Standardized XML representation
-- **Plain Text**: Simple console output
+### Output Options
+- Multiple output formats (fancy, JSON, XML, text)
+- Greppable output for automation
+- Verbose logging capabilities
+- Custom output paths and formats
+- Real-time scan progress indicators
 
-## 🔧 Requirements
+### Advanced Features
+- Proxy support for anonymous scanning
+- Custom User-Agent configuration
+- Rate limiting and throttling
+- Integration with custom scripts
+- Configuration saving and loading
 
-### System Requirements
-- Python 3.7+
-- Root/sudo privileges
-- Linux/macOS recommended
+## Installation
 
-### Python Dependencies
-- `scapy`
-- `termcolor` (optional, for enhanced color output)
+### Prerequisites
+- Python 3.7 or higher
+- Root/sudo privileges (required for raw socket operations)
 
-## 🛠 Installation
+### Required Python Packages
+```bash
+pip install -r requirements.txt
+```
+
+The requirements.txt should contain:
+```
+scapy>=2.4.5
+termcolor>=1.1.0
+ipaddress>=1.0.23
+```
+
+### Installation Steps
 
 1. Clone the repository:
 ```bash
@@ -42,72 +61,183 @@ git clone https://github.com/q4n0/k0bra.git
 cd k0bra
 ```
 
-2. Install required dependencies:
+2. Install dependencies:
 ```bash
-pip install scapy
-pip install termcolor  # Optional
+pip install -r requirements.txt
 ```
 
-## 🖥 Usage
-
-### Basic Scan
+3. Make the script executable:
 ```bash
-sudo python3 k0bra.py 192.168.1.0/24
+chmod +x k0bra.py
 ```
 
-### Advanced Usage
+## Usage
+
+### Basic Usage
+
+Start the scanner with:
 ```bash
-# Specify output format
-sudo python3 k0bra.py 192.168.1.0/24 -f json
-
-# Customize worker count
-sudo python3 k0bra.py 192.168.1.0/24 -w 100
-
-# Enable verbose logging
-sudo python3 k0bra.py 192.168.1.0/24 -v
+sudo python3 k0bra.py
 ```
 
-### Command-Line Options
-- `network`: Network CIDR to scan (required)
-- `-f, --format`: Output format (fancy/json/xml/text, default: fancy)
-- `-w, --workers`: Maximum concurrent workers (default: 50)
-- `-v, --verbose`: Enable detailed logging
+This will launch the interactive menu interface where you can configure and run scans.
 
-## 📋 Output Examples
+### Menu System
 
-### Fancy Output (Default)
-- Colorful console display
-- Emoji-enhanced readability
-- Sorted host information
-- Network scan summary statistics
+The tool features a hierarchical menu system:
 
-### JSON Output
-- Structured data suitable for programmatic processing
-- Includes IP, MAC, hostname, and port details
+1. Main Menu
+   - Set target network
+   - Configure scan options
+   - Configure performance settings
+   - Configure output settings
+   - Advanced options
+   - Start scan
+   - Save/Load configuration
 
-## ⚠️ Legal and Ethical Use
+2. Scan Options
+   - Port range configuration
+   - Custom port selection
+   - Service detection settings
+   - Banner grabbing options
+   - Scan order selection
 
-K0bra is intended for network administrators and security professionals to assess and manage their own networks. Always obtain proper authorization before scanning networks you do not own or manage.
+3. Performance Settings
+   - Batch size adjustment
+   - Timeout configuration
+   - Resource limit settings
+   - Worker pool size
+   - Retry attempts
 
-## 🤝 Contributing
+4. Output Settings
+   - Format selection
+   - Verbose mode
+   - Greppable output
+   - Custom output paths
+
+### Example Configurations
+
+#### Quick Scan
+```python
+network: 192.168.1.0/24
+port_range: 1-1000
+batch_size: 500
+timeout_ms: 1500
+scan_order: serial
+```
+
+#### Thorough Scan
+```python
+network: 192.168.1.0/24
+port_range: 1-65535
+batch_size: 100
+timeout_ms: 3000
+max_retries: 3
+aggressive_scan: true
+```
+
+#### Stealth Scan
+```python
+network: 192.168.1.0/24
+port_range: 1-1000
+batch_size: 50
+timeout_ms: 2000
+rate_limit: 100
+proxy: socks5://127.0.0.1:9050
+```
+
+## Best Practices
+
+### Performance Optimization
+- Start with smaller port ranges and adjust based on network conditions
+- Use appropriate batch sizes for your network (default: 500)
+- Enable skip_empty_ranges for faster scans
+- Adjust timeouts based on network latency
+
+### Network Consideration
+- Use rate limiting on sensitive networks
+- Enable aggressive_scan only when necessary
+- Consider proxy usage for sensitive scans
+- Monitor system resources during large scans
+
+### Output Management
+- Use JSON format for programmatic processing
+- Enable verbose mode for debugging
+- Use greppable output for automation
+- Save configurations for repeated scans
+
+## Advanced Usage
+
+### Custom Scripts Integration
+
+Create custom scripts for post-scan processing:
+```python
+# custom_script.py
+def process_results(scan_results):
+    # Process scan results
+    pass
+```
+
+### Configuration Files
+
+Save and load scan configurations:
+```json
+{
+  "network": "192.168.1.0/24",
+  "port_range": "1-1000",
+  "batch_size": 500,
+  "timeout_ms": 1500,
+  "scan_order": "serial",
+  "aggressive_scan": false
+}
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. Permission Errors
+```bash
+sudo python3 k0bra.py
+```
+
+2. Resource Limits
+```bash
+ulimit -n 5000
+```
+
+3. Network Timeouts
+- Adjust timeout_ms setting
+- Reduce batch_size
+- Enable max_retries
+
+## Contributing
+
+Contributions are welcome! Please read my contributing guidelines before submitting pull requests.
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Submit a pull request
 
-## 📜 License
+## Acknowledgments
 
-Distributed under the MIT License. See `LICENSE` for more information.
+- RustScan for inspiration on performance features
+- Nmap for service detection techniques
+- The Python networking community
 
-## 👥 Contact
+## Security Considerations
 
-Project Developer: q4n0
-- GitHub: [@q4n0](https://github.com/q4n0)
-- Instagram: [@onlybyhive](https://instagram.com/onlybyhive)
+This tool should be used responsibly and only on networks you have permission to scan. Unauthorized scanning may be illegal in your jurisdiction.
 
-## 🙏 Acknowledgments
+## Support
 
-- [Scapy](https://scapy.net/) for powerful network packet manipulation
-- [Python Asyncio](https://docs.python.org/3/library/asyncio.html) for concurrent networking
+For issues and feature requests, please use the GitHub issue tracker or contact the maintainers directly.
+
+---
+Created by [b0urn3]  
+GitHub: [github.com/q4n0]  
+Version: 0.2
+
+Remember to scan responsibly and always obtain proper authorization before scanning any network.
