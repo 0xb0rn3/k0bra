@@ -14,7 +14,40 @@ from typing import List, Dict, Optional, Any
 import argparse
 from simple_term_menu import TerminalMenu
 import time
+import ipaddress
 
+class K0braNetworkScanner:
+    # ASCII art banner for the scanner
+    BANNER = """
+    ██╗  ██╗ ██████╗ ██████╗ ██████╗  █████╗ 
+    ██║ ██╔╝██╔═████╗██╔══██╗██╔══██╗██╔══██╗
+    █████╔╝ ██║██╔██║██████╔╝██████╔╝███████║
+    ██╔═██╗ ████╔╝██║██╔══██╗██╔══██╗██╔══██║
+    ██║  ██╗╚██████╔╝██████╔╝██║  ██║██║  ██║
+    ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+    Network Scanner v0.2 - By b0urn3
+    """
+
+    @dataclass
+    class HostResult:
+        """Data class to store host scanning results"""
+        ip: str
+        mac: Optional[str] = None
+        hostname: Optional[str] = None
+        ports: Optional[List[Dict[str, Any]]] = None
+
+    def __init__(self, network: str = "192.168.1.0/24"):
+        """Initialize the scanner with default network"""
+        self.network = ipaddress.ip_network(network, strict=False)
+        self.output_format = 'fancy'  # Default output format
+
+    async def dns_resolution(self, ip: str) -> Optional[str]:
+        """Resolve IP address to hostname"""
+        try:
+            hostname = socket.gethostbyaddr(ip)[0]
+            return hostname
+        except (socket.herror, socket.gaierror):
+            return None
 # Service fingerprinting database
 SERVICE_DB = {
     21: {'name': 'FTP', 'banner': True},
