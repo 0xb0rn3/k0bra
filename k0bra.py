@@ -16,6 +16,14 @@ from simple_term_menu import TerminalMenu
 import time
 import ipaddress
 
+@dataclass
+class HostResult:
+    """Data class to store host scanning results"""
+    ip: str
+    mac: Optional[str] = None
+    hostname: Optional[str] = None
+    ports: Optional[List[Dict[str, Any]]] = None
+
 class K0braNetworkScanner:
     # ASCII art banner for the scanner
     BANNER = """
@@ -28,13 +36,10 @@ class K0braNetworkScanner:
     Network Scanner v0.2 - By b0urn3
     """
 
-    @dataclass
-    class HostResult:
-        """Data class to store host scanning results"""
-        ip: str
-        mac: Optional[str] = None
-        hostname: Optional[str] = None
-        ports: Optional[List[Dict[str, Any]]] = None
+    def __init__(self, network: str = "192.168.1.0/24"):
+        """Initialize the scanner with default network"""
+        self.network = ipaddress.ip_network(network, strict=False)
+        self.output_format = 'fancy'  # Default output format
 
     def __init__(self, network: str = "192.168.1.0/24"):
         """Initialize the scanner with default network"""
