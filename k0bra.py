@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 
 import asyncio
 import os
 import ipaddress
 import json
 import socket
-import termcolor
+import termcolor  # Add this line
 import sys
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -16,6 +16,14 @@ from simple_term_menu import TerminalMenu
 import time
 import ipaddress
 
+# Add this block after the imports
+HAVE_COLOR = True
+try:
+    from termcolor import colored
+except ImportError:
+    HAVE_COLOR = False
+    def colored(text, color=None, *args, **kwargs):
+        return text
 @dataclass
 class HostResult:
     """Data class to store host scanning results"""
@@ -968,22 +976,20 @@ def main():
         
         # Check for root/sudo privileges
         if not (hasattr(os, 'geteuid') and os.geteuid() == 0):
-            print(colored("[ERROR] This tool requires root/sudo privileges", "red"))
-            sys.exit(1)
+            sys.exit("[ERROR] This tool requires root/sudo privileges")
         
         # Check for required packages
+        required_packages = ['termcolor', 'netifaces', 'psutil']
         missing_packages = []
-        try:
-            import netifaces
-        except ImportError:
-            missing_packages.append('netifaces')
-        try:
-            import psutil
-        except ImportError:
-            missing_packages.append('psutil')
+        
+        for package in required_packages:
+            try:
+                __import__(package)
+            except ImportError:
+                missing_packages.append(package)
         
         if missing_packages:
-            print(colored("Missing required packages:", "yellow"))
+            print("Missing required packages:")
             print("  " + ", ".join(missing_packages))
             install = input("Would you like to install them now? (y/n): ")
             if install.lower() == 'y':
@@ -992,8 +998,23 @@ def main():
                     try:
                         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
                     except subprocess.CalledProcessError as e:
-                        print(colored(f"Failed to install {package}: {e}", "red"))
-                        sys.exit(1)
+                        sys.exit(f"Failed to install {package}: {e}")
+                print("Please restart the program to use the newly installed packages")
+                sys.exit(0)
+            else:
+                sys.exit("Required packages must be installed to continue")
+        
+        # Initialize and run scanner
+        scanner = EnhancedK0braScanner()
+        asyncio.run(scanner.show_interactive_menu())
+    
+    except KeyboardInterrupt:
+        print("\n[INFO] Scanner interrupted by user")
+    except Exception as e:
+        print(f"[CRITICAL] Unexpected error: {e}")
+        if hasattr(scanner, 'logger'):
+            scanner.logger.error(f"Critical error: {e}", exc_info=True)
+        sys.exit(1)
         
         # Initialize and run scanner
         scanner = EnhancedK0braScanner()
