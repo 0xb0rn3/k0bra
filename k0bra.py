@@ -105,7 +105,7 @@ class EnhancedK0braScanner(K0braNetworkScanner):
     """Enhanced scanner with improved error handling and features"""
     def __init__(self, **kwargs):
         
-        def _setup_thread_pool(self):
+def _setup_thread_pool(self):
     """Initialize thread pool executor with proper resource limits"""
     max_workers = min(32, (os.cpu_count() or 1) * 4)
     self._thread_pool = ThreadPoolExecutor(
