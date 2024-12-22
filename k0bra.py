@@ -104,31 +104,7 @@ class K0braNetworkScanner:
 class EnhancedK0braScanner(K0braNetworkScanner):
     """Enhanced scanner with improved error handling and features"""
     def __init__(self, **kwargs):
-        
-def _setup_thread_pool(self):
-    """Initialize thread pool executor with proper resource limits"""
-    max_workers = min(32, (os.cpu_count() or 1) * 4)
-    self._thread_pool = ThreadPoolExecutor(
-        max_workers=max_workers,
-        thread_name_prefix="ScannerThread"
-    )
-    self._resources.append(self._thread_pool)
-
-def _cleanup_resources(self):
-    """Clean up allocated resources safely"""
-    for resource in self._resources:
-        try:
-            if hasattr(resource, 'close'):
-                if asyncio.iscoroutinefunction(resource.close):
-                    asyncio.create_task(resource.close())
-                else:
-                    resource.close()
-        except Exception as e:
-            self.logger.error(f"Resource cleanup failed: {str(e)}")
-    self._resources.clear()
-        """
-        Initialize scanner with robust error checking and parameter validation
-        """
+        """Initialize scanner with robust error checking and parameter validation"""
         self._resources = []  # Track allocated resources
         self._host_list_lock = asyncio.Lock()  # Lock for thread-safe host list operations
         
@@ -154,6 +130,7 @@ def _cleanup_resources(self):
                 kwargs.get('max_retries', 3),
                 'max_retries'
             )
+            
             # Additional configuration
             self.scan_order = kwargs.get('scan_order', 'serial')
             self.skip_empty = kwargs.get('skip_empty', True)
@@ -173,14 +150,36 @@ def _cleanup_resources(self):
             self.output_directory = kwargs.get('output_directory', '.')
             
             # Performance monitoring
-            self.scan_start_time: Optional[float] = None
-            self.scan_end_time: Optional[float] = None
+            self.scan_start_time = None
+            self.scan_end_time = None
             
             # Initialize thread pool
             self._setup_thread_pool()
         except Exception:
             self._cleanup_resources()
             raise
+
+    def _setup_thread_pool(self):
+        """Initialize thread pool executor with proper resource limits"""
+        max_workers = min(32, (os.cpu_count() or 1) * 4)
+        self._thread_pool = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="ScannerThread"
+        )
+        self._resources.append(self._thread_pool)
+
+    def _cleanup_resources(self):
+        """Clean up allocated resources safely"""
+        for resource in self._resources:
+            try:
+                if hasattr(resource, 'close'):
+                    if asyncio.iscoroutinefunction(resource.close):
+                        asyncio.create_task(resource.close())
+                    else:
+                        resource.close()
+            except Exception as e:
+                self.logger.error(f"Resource cleanup failed: {str(e)}")
+        self._resources.clear()
         
     def _validate_positive_int(self, value: Any, param_name: str, max_value: Optional[int] = None) -> int:
         """
