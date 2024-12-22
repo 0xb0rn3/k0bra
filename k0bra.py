@@ -591,12 +591,8 @@ async def _grab_service_banner(self, target: str, port: int, service_info: Dict[
             except ValueError:
                 print(colored("Invalid input", "red"))
 
-    def _save_scan_history(self, results: List[HostResult], duration: float):
+def _save_scan_history(self, results: List[HostResult], duration: float):
     """Save scan results and metadata to history with proper file handling"""
-    import fcntl
-    import tempfile
-    import os
-    
     history_entry = {
         'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
         'network': str(self.network),
