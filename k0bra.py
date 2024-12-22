@@ -1,4 +1,5 @@
-#!/usr/bin/env python3 
+#!/usr/bin/env python3
+
 # Standard library imports for core functionality
 import asyncio
 import json
@@ -35,17 +36,7 @@ except ImportError:
 # ---- Data Models ----
 @dataclass
 class HostResult:
-    """
-    Data class for storing host scanning results
-    
-    Attributes:
-        ip (str): IP address of the scanned host
-        mac (Optional[str]): MAC address if discovered during ARP scan
-        hostname (Optional[str]): DNS hostname if resolution is successful
-        ports (Optional[List[Dict[str, Any]]]): List of discovered open ports and services
-        last_seen (float): Timestamp of last successful scan
-        scan_duration (float): Time taken to scan this host
-    """
+    """Data class for storing host scanning results"""
     ip: str
     mac: Optional[str] = None
     hostname: Optional[str] = None
@@ -54,15 +45,7 @@ class HostResult:
     scan_duration: float = 0.0
 
     async def dns_resolution(self, ip: str) -> Optional[str]:
-        """
-        Resolve IP address to hostname with timeout and error handling
-        
-        Args:
-            ip (str): IP address to resolve
-            
-        Returns:
-            Optional[str]: Resolved hostname or None if resolution fails
-        """
+        """Resolve IP address to hostname with timeout and error handling"""
         try:
             return await asyncio.get_event_loop().run_in_executor(
                 None,
@@ -71,9 +54,9 @@ class HostResult:
         except (socket.herror, socket.gaierror):
             return None
         except Exception as e:
-            self.logger.debug(f"DNS resolution failed for {ip}: {str(e)}")
+            logging.debug(f"DNS resolution failed for {ip}: {str(e)}")
             return None
-    
+
 # ---- Constants and Configuration ----
 SERVICE_DB = {
     21: {'name': 'FTP', 'banner': True, 'default_banner_length': 1024},
@@ -107,24 +90,7 @@ class EnhancedK0braScanner(K0braNetworkScanner):
     """Enhanced scanner with improved error handling and features"""
     
     def __init__(self, **kwargs):
-        """
-        Initialize scanner with comprehensive error checking and parameter validation
-        
-        Args:
-            **kwargs: Configuration parameters including:
-                network (str): Target network in CIDR notation
-                batch_size (int): Number of concurrent scans
-                timeout (float): Scan timeout in seconds
-                max_retries (int): Maximum retry attempts
-                scan_order (str): Scanning order ('serial' or 'random')
-                skip_empty (bool): Skip empty IP ranges
-                rate_limit (int): Maximum scans per second
-                ports (range): Port range to scan
-                verbose (bool): Enable verbose logging
-                log_file (str): Log file path
-                output_format (str): Output format
-                output_directory (str): Output directory path
-        """
+        """Initialize scanner with comprehensive error checking"""
         # Initialize resource tracking
         self._resources = []
         self._host_list_lock = asyncio.Lock()
@@ -181,6 +147,7 @@ class EnhancedK0braScanner(K0braNetworkScanner):
             # Ensure proper cleanup on initialization failure
             self._cleanup_resources()
             raise
+
     def _setup_thread_pool(self):
         """Initialize thread pool executor with proper resource limits"""
         max_workers = min(32, (os.cpu_count() or 1) * 4)
@@ -202,21 +169,9 @@ class EnhancedK0braScanner(K0braNetworkScanner):
             except Exception as e:
                 self.logger.error(f"Resource cleanup failed: {str(e)}")
         self._resources.clear()
+
     def _validate_positive_int(self, value: Any, param_name: str, max_value: Optional[int] = None) -> int:
-        """
-        Validate integer parameters
-        
-        Args:
-            value: Value to validate
-            param_name: Parameter name for error messages
-            max_value: Optional maximum allowed value
-            
-        Returns:
-            int: Validated integer value
-            
-        Raises:
-            ValueError: If validation fails
-        """
+        """Validate integer parameters"""
         try:
             int_value = int(value)
             if int_value <= 0:
@@ -226,21 +181,9 @@ class EnhancedK0braScanner(K0braNetworkScanner):
             return int_value
         except (TypeError, ValueError):
             raise ValueError(f"{param_name} must be a positive integer")
-               
+
     def _validate_positive_float(self, value: Any, param_name: str) -> float:
-        """
-        Validate float parameters
-        
-        Args:
-            value: Value to validate
-            param_name: Parameter name for error messages
-            
-        Returns:
-            float: Validated float value
-            
-        Raises:
-            ValueError: If validation fails
-        """
+        """Validate float parameters"""
         try:
             float_value = float(value)
             if float_value <= 0:
@@ -248,28 +191,9 @@ class EnhancedK0braScanner(K0braNetworkScanner):
             return float_value
         except (TypeError, ValueError):
             raise ValueError(f"{param_name} must be a positive number")
-        
- # Scanner configuration with proper typing
-        self.batch_size: int = kwargs.get('batch_size', 500)
-        self.ulimit: int = kwargs.get('ulimit', 1024)
-        self.timeout: float = kwargs.get('timeout', 1.5)
-        self.max_retries: int = kwargs.get('max_retries', 3)
-        self.scan_order: str = kwargs.get('scan_order', 'serial')
-        self.skip_empty: bool = kwargs.get('skip_empty', True)
-        self.rate_limit: int = kwargs.get('rate_limit', 1000)
-        self.scan_ports: range = kwargs.get('ports', range(1, 1024))
-        self.verbose_logging: bool = kwargs.get('verbose', False)
-        self.log_file = kwargs.get('log_file', 'k0bra_scan.log')
-        self._setup_logging()
-        self.output_format = kwargs.get('output_format', 'fancy')
-        self.output_directory = kwargs.get('output_directory', '.')
-        # Performance monitoring
-        self.scan_start_time: Optional[float] = None
-        self.scan_end_time: Optional[float] = None
 
     def _setup_logging(self):
         """Configure logging with different levels and output formats"""
-        import logging
         logging.basicConfig(
             filename=self.log_file,
             level=logging.DEBUG if self.verbose_logging else logging.INFO,
@@ -1305,12 +1229,7 @@ def _pretty_print_xml(self, element: ET.Element, indent: str = '  ') -> str:
 
 
     async def main(self):
-        """
-        Main entry point with comprehensive error handling and cleanup
-        
-        Returns:
-            int: Exit code (0 for success, 1 for error)
-        """
+        """Main entry point with comprehensive error handling and cleanup"""
         def signal_handler(signum, frame):
             """Handle system signals for graceful shutdown"""
             raise KeyboardInterrupt()
@@ -1348,18 +1267,16 @@ def _pretty_print_xml(self, element: ET.Element, indent: str = '  ') -> str:
                 self.scan_end_time = time.time()
                 
         except KeyboardInterrupt:
-            # Handle user interruption
             print(colored("\nScanner interrupted by user", "yellow"))
             self.logger.info("Scanner interrupted by user")
             return 1
         except Exception as e:
-            # Handle critical errors
             print(colored(f"Critical error: {str(e)}", "red"))
             self.logger.error(f"Critical error: {str(e)}", exc_info=True)
             return 1
             
         return 0
-    
+
 if __name__ == "__main__":
     # Set up signal handlers for graceful shutdown
     import signal
