@@ -1,5 +1,4 @@
 #!/usr/bin/env python3 
-
 # Standard library imports for core functionality
 import asyncio
 import json
@@ -944,8 +943,8 @@ def _save_scan_history(self, results: List[HostResult], duration: float):
             elif choice == 4 or choice is None:
                 break
 
-     def export_results(self, results: List[HostResult]) -> str:
-        """Export scan results with proper XML handling and error checking"""
+def export_results(self, results: List[HostResult]) -> str:
+    """Export scan results with proper XML handling and error checking"""
         if self.output_format == 'xml':
             root = ET.Element('scan_results')
             
