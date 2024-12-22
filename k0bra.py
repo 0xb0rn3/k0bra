@@ -1,4 +1,5 @@
 #!/usr/bin/env python3 
+
 # Standard library imports for core functionality
 import asyncio
 import json
@@ -678,8 +679,6 @@ def _save_scan_history(self, results: List[HostResult], duration: float):
     finally:
         if temp_file:
             temp_file.close()
-        except Exception as e:
-            self.logger.error(f"Failed to save scan history: {str(e)}")
 
     def display_scan_history(self):
         """Display historical scan information"""
