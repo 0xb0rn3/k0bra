@@ -86,8 +86,8 @@ class K0braNetworkScanner:
     Network Scanner v0.4 - By 0xb0urn3
     """
 
-class EnhancedK0braScanner(K0braNetworkScanner):
-    """Enhanced scanner with improved error handling and features"""
+class EnhancedK0braScanner:
+    async def _check_port_service(self, target: str, port: int):
     
     def __init__(self, **kwargs):
         """Initialize scanner with comprehensive error checking"""
@@ -418,34 +418,34 @@ async def _grab_service_banner(self, target: str, port: int, service_info: Dict[
         self.logger.debug(f"Banner grab failed for {target}:{port} - {str(e)}")
         return None
     
-    async def enhanced_port_scan(self, target: str) -> List[Dict[str, Any]]:
-        """
-        Perform enhanced port scanning with improved concurrency and error handling
-        """
-        semaphore = asyncio.Semaphore(self.batch_size)
-        port_batches = [self.scan_ports[i:i + self.batch_size] 
-                       for i in range(0, len(self.scan_ports), self.batch_size)]
+async def enhanced_port_scan(self, target: str) -> List[Dict[str, Any]]:
+    """
+    Perform enhanced port scanning with improved concurrency and error handling
+    """
+    semaphore = asyncio.Semaphore(self.batch_size)
+    port_batches = [self.scan_ports[i:i + self.batch_size] 
+                   for i in range(0, len(self.scan_ports), self.batch_size)]
+    
+    async def scan_with_semaphore(port):
+        async with semaphore:
+            return await self.scan_single_port_with_retry(target, port)
+    
+    open_ports = []
+    for batch in port_batches:
+        batch_tasks = [scan_with_semaphore(port) for port in batch]
+        results = await asyncio.gather(*batch_tasks, return_exceptions=True)
         
-        async def scan_with_semaphore(port):
-            async with semaphore:
-                return await self.scan_single_port_with_retry(target, port)
+        for result in results:
+            if isinstance(result, Exception):
+                self.logger.debug(f"Port scan error: {str(result)}")
+                continue
+            if result:
+                open_ports.append(result)
         
-        open_ports = []
-        for batch in port_batches:
-            batch_tasks = [scan_with_semaphore(port) for port in batch]
-            results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-            
-            for result in results:
-                if isinstance(result, Exception):
-                    self.logger.debug(f"Port scan error: {str(result)}")
-                    continue
-                if result:
-                    open_ports.append(result)
-            
-            if self.rate_limit:
-                await asyncio.sleep(len(batch) / self.rate_limit)
-        
-        return open_ports
+        if self.rate_limit:
+            await asyncio.sleep(len(batch) / self.rate_limit)
+    
+    return open_ports
 
     async def scan_single_port_with_retry(self, target: str, port: int) -> Optional[Dict[str, Any]]:
         """
@@ -869,66 +869,66 @@ def _save_scan_history(self, results: List[HostResult], duration: float):
 
 def export_results(self, results: List[HostResult]) -> str:
     """Export scan results with proper XML handling and error checking"""
-        if self.output_format == 'xml':
-            root = ET.Element('scan_results')
-            
-            # Add scan information
-            info = ET.SubElement(root, 'scan_info')
-            ET.SubElement(info, 'network').text = str(self.network)
-            ET.SubElement(info, 'start_time').text = str(self.scan_start_time)
-            ET.SubElement(info, 'end_time').text = str(self.scan_end_time)
-            
-            # Add host results with proper error handling
-            hosts = ET.SubElement(root, 'hosts')
-            for host in results:
-                host_elem = ET.SubElement(hosts, 'host')
-                host_dict = asdict(host)
-                for key, value in host_dict.items():
-                    if value is not None:
-                        # Convert complex types to JSON strings
-                        if isinstance(value, (dict, list)):
-                            value = json.dumps(value)
-                        child = ET.SubElement(host_elem, key)
-                        child.text = str(value)
-            
-            # Use custom pretty printing instead of lxml dependency
-            return self._pretty_print_xml(root)
-        elif self.output_format == 'grep':
-            # Format: host:port:protocol:service:banner
-            lines = []
-            for host in results:
-                if host.ports:
-                    for port in host.ports:
-                        line = f"{host.ip}:{port['port']}:tcp:{port['service']}:{port.get('banner', '')}"
-                        lines.append(line)
-            return '\n'.join(lines)
+    if self.output_format == 'xml':
+        root = ET.Element('scan_results')
         
-        else:  # Plain text
-            output = []
-            output.append("K0bra Network Scan Results")
-            output.append("=" * 50)
-            output.append(f"Network: {self.network}")
-            output.append(f"Scan Duration: {self.scan_end_time - self.scan_start_time:.2f}s")
+        # Add scan information
+        info = ET.SubElement(root, 'scan_info')
+        ET.SubElement(info, 'network').text = str(self.network)
+        ET.SubElement(info, 'start_time').text = str(self.scan_start_time)
+        ET.SubElement(info, 'end_time').text = str(self.scan_end_time)
+        
+        # Add host results with proper error handling
+        hosts = ET.SubElement(root, 'hosts')
+        for host in results:
+            host_elem = ET.SubElement(hosts, 'host')
+            host_dict = asdict(host)
+            for key, value in host_dict.items():
+                if value is not None:
+                    # Convert complex types to JSON strings
+                    if isinstance(value, (dict, list)):
+                        value = json.dumps(value)
+                    child = ET.SubElement(host_elem, key)
+                    child.text = str(value)
+        
+        # Use custom pretty printing instead of lxml dependency
+        return self._pretty_print_xml(root)
+    elif self.output_format == 'grep':
+        # Format: host:port:protocol:service:banner
+        lines = []
+        for host in results:
+            if host.ports:
+                for port in host.ports:
+                    line = f"{host.ip}:{port['port']}:tcp:{port['service']}:{port.get('banner', '')}"
+                    lines.append(line)
+        return '\n'.join(lines)
+    
+    else:  # Plain text
+        output = []
+        output.append("K0bra Network Scan Results")
+        output.append("=" * 50)
+        output.append(f"Network: {self.network}")
+        output.append(f"Scan Duration: {self.scan_end_time - self.scan_start_time:.2f}s")
+        output.append("")
+        
+        for host in results:
+            output.append(f"Host: {host.ip}")
+            if host.hostname:
+                output.append(f"Hostname: {host.hostname}")
+            if host.mac:
+                output.append(f"MAC Address: {host.mac}")
+            
+            if host.ports:
+                output.append("Open Ports:")
+                for port in host.ports:
+                    port_line = f"  {port['port']}/tcp\t{port['service']}"
+                    if port.get('banner'):
+                        port_line += f"\t{port['banner']}"
+                    output.append(port_line)
+            
             output.append("")
-            
-            for host in results:
-                output.append(f"Host: {host.ip}")
-                if host.hostname:
-                    output.append(f"Hostname: {host.hostname}")
-                if host.mac:
-                    output.append(f"MAC Address: {host.mac}")
-                
-                if host.ports:
-                    output.append("Open Ports:")
-                    for port in host.ports:
-                        port_line = f"  {port['port']}/tcp\t{port['service']}"
-                        if port.get('banner'):
-                            port_line += f"\t{port['banner']}"
-                        output.append(port_line)
-                
-                output.append("")
-            
-            return '\n'.join(output)
+        
+        return '\n'.join(output)
     
 def _pretty_print_xml(self, element: ET.Element, indent: str = '  ') -> str:
     """Custom XML pretty printer without external dependencies"""
