@@ -1,22 +1,27 @@
 #!/usr/bin/env python3 
 import asyncio
-import os
-import ipaddress
 import json
+import logging
+import os
 import socket
-import termcolor  # Add this line
 import sys
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict
-from scapy.all import ARP, Ether, srp, IP, TCP, sr1
-from typing import List, Dict, Optional, Any
-import argparse
-from simple_term_menu import TerminalMenu
 import time
-import ipaddress
+from typing import List, Dict, Optional, Any, Union
+import resource
+import tempfile
+import fcntl
 
-# Add this block after the imports
+# Third-party imports
+import ipaddress
+import netifaces
+import psutil
+from scapy.all import ARP, Ether, srp, IP, TCP, sr1
+from simple_term_menu import TerminalMenu
+
+# Terminal color support check
 HAVE_COLOR = True
 try:
     from termcolor import colored
@@ -24,16 +29,68 @@ except ImportError:
     HAVE_COLOR = False
     def colored(text, color=None, *args, **kwargs):
         return text
+
+# ---- Data Models ----
 @dataclass
 class HostResult:
-    """Data class to store host scanning results"""
+    """
+    Data class for storing host scanning results
+    
+    Attributes:
+        ip (str): IP address of the scanned host
+        mac (Optional[str]): MAC address if discovered during ARP scan
+        hostname (Optional[str]): DNS hostname if resolution is successful
+        ports (Optional[List[Dict[str, Any]]]): List of discovered open ports and services
+        last_seen (float): Timestamp of last successful scan
+        scan_duration (float): Time taken to scan this host
+    """
     ip: str
     mac: Optional[str] = None
     hostname: Optional[str] = None
     ports: Optional[List[Dict[str, Any]]] = None
+    last_seen: float = 0.0
+    scan_duration: float = 0.0
+
+async def dns_resolution(self, ip: str) -> Optional[str]:
+    """
+    Resolve IP address to hostname with timeout and error handling
+    
+    Args:
+        ip (str): IP address to resolve
+        
+    Returns:
+        Optional[str]: Resolved hostname or None if resolution fails
+    """
+    try:
+        return await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: socket.gethostbyaddr(ip)[0]
+        )
+    except (socket.herror, socket.gaierror):
+        return None
+    except Exception as e:
+        self.logger.debug(f"DNS resolution failed for {ip}: {str(e)}")
+        return None
+    
+# ---- Constants and Configuration ----
+SERVICE_DB = {
+    21: {'name': 'FTP', 'banner': True, 'default_banner_length': 1024},
+    22: {'name': 'SSH', 'banner': True, 'default_banner_length': 512},
+    23: {'name': 'Telnet', 'banner': True, 'default_banner_length': 1024},
+    25: {'name': 'SMTP', 'banner': True, 'default_banner_length': 512},
+    53: {'name': 'DNS', 'banner': False, 'protocol': 'UDP'},
+    80: {'name': 'HTTP', 'banner': True, 'default_banner_length': 2048},
+    110: {'name': 'POP3', 'banner': True, 'default_banner_length': 512},
+    143: {'name': 'IMAP', 'banner': True, 'default_banner_length': 512},
+    443: {'name': 'HTTPS', 'banner': True, 'default_banner_length': 2048},
+    445: {'name': 'SMB', 'banner': False, 'protocol': 'TCP'},
+    3306: {'name': 'MySQL', 'banner': True, 'default_banner_length': 512},
+    5432: {'name': 'PostgreSQL', 'banner': True, 'default_banner_length': 512}
+}
 
 class K0braNetworkScanner:
-    # ASCII art banner for the scanner
+    """Base network scanner class with core functionality"""
+    
     BANNER = """
     ██╗  ██╗ ██████╗ ██████╗ ██████╗  █████╗ 
     ██║ ██╔╝██╔═████╗██╔══██╗██╔══██╗██╔══██╗
@@ -41,69 +98,132 @@ class K0braNetworkScanner:
     ██╔═██╗ ████╔╝██║██╔══██╗██╔══██╗██╔══██║
     ██║  ██╗╚██████╔╝██████╔╝██║  ██║██║  ██║
     ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
-    Network Scanner v0.2 - By b0urn3
+    Network Scanner v0.4 - By 0xb0urn3
     """
 
-    def __init__(self, network: str = "192.168.1.0/24"):
-        """Initialize the scanner with default network"""
-        self.network = ipaddress.ip_network(network, strict=False)
-        self.output_format = 'fancy'  # Default output format
-
-    def __init__(self, network: str = "192.168.1.0/24"):
-        """Initialize the scanner with default network"""
-        self.network = ipaddress.ip_network(network, strict=False)
-        self.output_format = 'fancy'  # Default output format
-
-    async def dns_resolution(self, ip: str) -> Optional[str]:
-        """Resolve IP address to hostname"""
-        try:
-            hostname = socket.gethostbyaddr(ip)[0]
-            return hostname
-        except (socket.herror, socket.gaierror):
-            return None
-# Service fingerprinting database
-SERVICE_DB = {
-    21: {'name': 'FTP', 'banner': True},
-    22: {'name': 'SSH', 'banner': True},
-    23: {'name': 'Telnet', 'banner': True},
-    25: {'name': 'SMTP', 'banner': True},
-    53: {'name': 'DNS', 'banner': False},
-    80: {'name': 'HTTP', 'banner': True},
-    110: {'name': 'POP3', 'banner': True},
-    143: {'name': 'IMAP', 'banner': True},
-    443: {'name': 'HTTPS', 'banner': True},
-    445: {'name': 'SMB', 'banner': False},
-    1433: {'name': 'MSSQL', 'banner': True},
-    3306: {'name': 'MySQL', 'banner': True},
-    3389: {'name': 'RDP', 'banner': False},
-    5432: {'name': 'PostgreSQL', 'banner': True},
-    6379: {'name': 'Redis', 'banner': True},
-    8080: {'name': 'HTTP-Proxy', 'banner': True},
-    27017: {'name': 'MongoDB', 'banner': True}
-}
-
 class EnhancedK0braScanner(K0braNetworkScanner):
+    """Enhanced scanner with improved error handling and features"""
     def __init__(self, **kwargs):
-        super().__init__(network="192.168.1.0/24")
         
-        # Scanner configuration
-        self.batch_size = kwargs.get('batch_size', 500)
-        self.ulimit = kwargs.get('ulimit', 1024)
-        self.timeout = kwargs.get('timeout', 1.5)
-        self.max_retries = kwargs.get('max_retries', 3)
-        self.scan_order = kwargs.get('scan_order', 'serial')
-        self.skip_empty = kwargs.get('skip_empty', True)
-        self.rate_limit = kwargs.get('rate_limit', 1000)
-        self.scan_ports = kwargs.get('ports', range(1, 1024))
-        self.verbose_logging = kwargs.get('verbose', False)
+        def _setup_thread_pool(self):
+    """Initialize thread pool executor with proper resource limits"""
+    max_workers = min(32, (os.cpu_count() or 1) * 4)
+    self._thread_pool = ThreadPoolExecutor(
+        max_workers=max_workers,
+        thread_name_prefix="ScannerThread"
+    )
+    self._resources.append(self._thread_pool)
+
+def _cleanup_resources(self):
+    """Clean up allocated resources safely"""
+    for resource in self._resources:
+        try:
+            if hasattr(resource, 'close'):
+                if asyncio.iscoroutinefunction(resource.close):
+                    asyncio.create_task(resource.close())
+                else:
+                    resource.close()
+        except Exception as e:
+            self.logger.error(f"Resource cleanup failed: {str(e)}")
+    self._resources.clear()
+        """
+        Initialize scanner with robust error checking and parameter validation
+        """
+        self._resources = []  # Track allocated resources
+        self._host_list_lock = asyncio.Lock()  # Lock for thread-safe host list operations
         
-        # Performance monitoring
-        self.scan_start_time = None
-        self.scan_end_time = None
+        try:
+            # Network configuration
+            network = kwargs.get('network', "192.168.1.0/24")
+            try:
+                self.network = ipaddress.ip_network(network, strict=False)
+            except ValueError as e:
+                raise ValueError(f"Invalid network format: {e}")
+
+            # Scanner parameters with validation
+            self.batch_size = self._validate_positive_int(
+                kwargs.get('batch_size', 500),
+                'batch_size',
+                max_value=1000
+            )
+            self.timeout = self._validate_positive_float(
+                kwargs.get('timeout', 1.5),
+                'timeout'
+            )
+            self.max_retries = self._validate_positive_int(
+                kwargs.get('max_retries', 3),
+                'max_retries'
+            )
+            # Additional configuration
+            self.scan_order = kwargs.get('scan_order', 'serial')
+            self.skip_empty = kwargs.get('skip_empty', True)
+            self.rate_limit = self._validate_positive_int(
+                kwargs.get('rate_limit', 1000),
+                'rate_limit'
+            )
+            self.scan_ports = kwargs.get('ports', range(1, 1024))
+            
+            # Logging configuration
+            self.verbose_logging = kwargs.get('verbose', False)
+            self.log_file = kwargs.get('log_file', 'k0bra_scan.log')
+            self._setup_logging()
+            
+            # Output configuration
+            self.output_format = kwargs.get('output_format', 'fancy')
+            self.output_directory = kwargs.get('output_directory', '.')
+            
+            # Performance monitoring
+            self.scan_start_time: Optional[float] = None
+            self.scan_end_time: Optional[float] = None
+            
+            # Initialize thread pool
+            self._setup_thread_pool()
+        except Exception:
+            self._cleanup_resources()
+            raise
         
-        # Logging setup
+    def _validate_positive_int(self, value: Any, param_name: str, max_value: Optional[int] = None) -> int:
+        """
+
+        
+        Args:
+            value: Value to validate
+            param_name: Parameter name for error messages
+            max_value: Optional maximum allowed value
+            
+        Returns:
+            int: Validated integer value
+            
+        Raises:
+            ValueError: If validation fails
+        """
+        try:
+            int_value = int(value)
+            if int_value <= 0:
+                raise ValueError
+            if max_value and int_value > max_value:
+                raise ValueError(f"{param_name} must be <= {max_value}")
+            return int_value
+        except (TypeError, ValueError):
+            raise ValueError(f"{param_name} must be a positive integer")
+        
+ # Scanner configuration with proper typing
+        self.batch_size: int = kwargs.get('batch_size', 500)
+        self.ulimit: int = kwargs.get('ulimit', 1024)
+        self.timeout: float = kwargs.get('timeout', 1.5)
+        self.max_retries: int = kwargs.get('max_retries', 3)
+        self.scan_order: str = kwargs.get('scan_order', 'serial')
+        self.skip_empty: bool = kwargs.get('skip_empty', True)
+        self.rate_limit: int = kwargs.get('rate_limit', 1000)
+        self.scan_ports: range = kwargs.get('ports', range(1, 1024))
+        self.verbose_logging: bool = kwargs.get('verbose', False)
         self.log_file = kwargs.get('log_file', 'k0bra_scan.log')
         self._setup_logging()
+        self.output_format = kwargs.get('output_format', 'fancy')
+        self.output_directory = kwargs.get('output_directory', '.')
+        # Performance monitoring
+        self.scan_start_time: Optional[float] = None
+        self.scan_end_time: Optional[float] = None
 
     def _setup_logging(self):
         """Configure logging with different levels and output formats"""
@@ -198,32 +318,59 @@ class EnhancedK0braScanner(K0braNetworkScanner):
             self.logger.error(f"Scan failed: {str(e)}")
             print(colored(f"Scan failed: {str(e)}", "red"))
 
+    async def _periodic_cleanup(self):
+        """Periodic cleanup of resources"""
+        while True:
+            try:
+                # Clean up unused resources
+                for resource in self._resources:
+                    if hasattr(resource, 'close'):
+                        await resource.close()
+                self._resources.clear()
+                
+                # Sleep for cleanup interval
+                await asyncio.sleep(60)  # Cleanup every minute
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Cleanup error: {str(e)}")
+
     async def enhanced_arp_scan(self) -> List[HostResult]:
-        """Improved ARP scanning with retry mechanism"""
+        """
+        Perform enhanced ARP scan with retry logic and proper error handling
+        """
         discovered_hosts = []
-        
+        scan_lock = asyncio.Lock()
+
         try:
-            # Create ARP request packet
-            arp_request = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=str(self.network))
-            
-            for attempt in range(self.max_retries):
-                # Send ARP requests with timeout
-                answered, _ = srp(arp_request, timeout=2, verbose=False)
+            async with scan_lock:
+                arp_request = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=str(self.network))
                 
-                for sent, received in answered:
-                    host = self.HostResult(
-                        ip=received[ARP].psrc,
-                        mac=received[Ether].src,
-                        hostname=await self.dns_resolution(received[ARP].psrc)
-                    )
-                    if host not in discovered_hosts:
-                        discovered_hosts.append(host)
+                for attempt in range(self.max_retries):
+                    try:
+                        answered, _ = srp(arp_request, timeout=2, verbose=False)
+                        
+                        async with self._host_list_lock:
+                            for sent, received in answered:
+                                host = HostResult(
+                                    ip=received[ARP].psrc,
+                                    mac=received[Ether].src,
+                                    hostname=await self.dns_resolution(received[ARP].psrc),
+                                    last_seen=time.time()
+                                )
+                                if host not in discovered_hosts:
+                                    discovered_hosts.append(host)
+                                    
+                        if discovered_hosts or attempt == self.max_retries - 1:
+                            break
+                            
+                        await asyncio.sleep(0.5)
+                        
+                    except Exception as e:
+                        self.logger.error(f"ARP scan attempt {attempt + 1} failed: {str(e)}")
+                        if attempt == self.max_retries - 1:
+                            raise
                 
-                if discovered_hosts or attempt == self.max_retries - 1:
-                    break
-                
-                await asyncio.sleep(0.5)
-            
             self.logger.info(f"ARP scan discovered {len(discovered_hosts)} hosts")
             
         except Exception as e:
@@ -231,28 +378,103 @@ class EnhancedK0braScanner(K0braNetworkScanner):
             raise
         
         return discovered_hosts
-
-    async def enhanced_port_scan(self, target: str) -> List[Dict[str, Any]]:
-        """Advanced port scanning with service detection and banner grabbing"""
-        open_ports = []
-        ports = list(self.scan_ports)
+async def _check_port_service(self, target: str, port: int) -> Optional[Dict[str, Any]]:
+    """
+    Check individual port and identify service with proper error handling
+    
+    Args:
+        target (str): Target IP address
+        port (int): Port number to check
         
-        if self.scan_order == 'random':
-            import random
-            random.shuffle(ports)
+    Returns:
+        Optional[Dict[str, Any]]: Port information dictionary or None if port is closed
+    """
+    try:
+        # Initial TCP connection check
+        tcp_packet = IP(dst=target)/TCP(dport=port, flags="S")
+        response = await asyncio.get_event_loop().run_in_executor(
+            self._thread_pool,
+            lambda: sr1(tcp_packet, timeout=self.timeout, verbose=False)
+        )
         
-        # Split ports into batches for efficient scanning
-        port_batches = [ports[i:i + self.batch_size] for i in range(0, len(ports), self.batch_size)]
-        
-        for batch in port_batches:
-            batch_tasks = []
-            for port in batch:
-                task = self.scan_single_port_with_retry(target, port)
-                batch_tasks.append(task)
+        if response and response.haslayer(TCP) and response[TCP].flags == 0x12:
+            service_info = SERVICE_DB.get(port, {'name': 'unknown', 'banner': False})
             
-            # Concurrent port scanning with rate limiting
-            batch_results = await asyncio.gather(*batch_tasks)
-            open_ports.extend([result for result in batch_results if result])
+            # Attempt banner grab if supported
+            banner = None
+            if service_info['banner']:
+                banner = await self._grab_service_banner(target, port, service_info)
+                
+            return {
+                'port': port,
+                'state': 'open',
+                'service': service_info['name'],
+                'banner': banner
+            }
+            
+        return None
+        
+    except Exception as e:
+        self.logger.debug(f"Port check failed for {target}:{port} - {str(e)}")
+        return None
+
+async def _grab_service_banner(self, target: str, port: int, service_info: Dict[str, Any]) -> Optional[str]:
+    """
+    Attempt to grab service banner with timeout protection
+    
+    Args:
+        target (str): Target IP address
+        port (int): Port number
+        service_info (Dict[str, Any]): Service information dictionary
+        
+    Returns:
+        Optional[str]: Service banner or None if banner grab fails
+    """
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(target, port),
+            timeout=service_info.get('banner_timeout', 1.0)
+        )
+        
+        try:
+            banner_data = await asyncio.wait_for(
+                reader.read(service_info['default_banner_length']),
+                timeout=1.0
+            )
+            
+            return banner_data.decode('utf-8', errors='ignore').strip()
+            
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            
+    except Exception as e:
+        self.logger.debug(f"Banner grab failed for {target}:{port} - {str(e)}")
+        return None
+    
+    async def enhanced_port_scan(self, target: str) -> List[Dict[str, Any]]:
+        """
+        Perform enhanced port scanning with improved concurrency and error handling
+        """
+        semaphore = asyncio.Semaphore(self.batch_size)
+        port_batches = [self.scan_ports[i:i + self.batch_size] 
+                       for i in range(0, len(self.scan_ports), self.batch_size)]
+        
+        async def scan_with_semaphore(port):
+            async with semaphore:
+                return await self.scan_single_port_with_retry(target, port)
+        
+        open_ports = []
+        for batch in port_batches:
+            batch_tasks = [scan_with_semaphore(port) for port in batch]
+            results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            
+            for result in results:
+                if isinstance(result, Exception):
+                    self.logger.debug(f"Port scan error: {str(result)}")
+                    continue
+                if result:
+                    open_ports.append(result)
             
             if self.rate_limit:
                 await asyncio.sleep(len(batch) / self.rate_limit)
@@ -260,28 +482,35 @@ class EnhancedK0braScanner(K0braNetworkScanner):
         return open_ports
 
     async def scan_single_port_with_retry(self, target: str, port: int) -> Optional[Dict[str, Any]]:
-        """Scan individual port with retry mechanism and service detection"""
+        """
+        Scan a single port with retry logic and proper error handling
+        """
+        writer = None
         for attempt in range(self.max_retries):
             try:
-                # Initial TCP connection attempt
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(target, port),
                     timeout=self.timeout
                 )
                 
-                # Service detection and banner grabbing
                 service_info = SERVICE_DB.get(port, {'name': 'unknown', 'banner': False})
                 banner = None
                 
                 if service_info['banner']:
                     try:
-                        banner_data = await asyncio.wait_for(reader.read(1024), timeout=1.0)
-                        banner = banner_data.decode().strip()
-                    except:
-                        pass
-                
-                writer.close()
-                await writer.wait_closed()
+                        banner_length = service_info.get('default_banner_length', 1024)
+                        banner_data = await asyncio.wait_for(
+                            reader.read(banner_length),
+                            timeout=service_info.get('banner_timeout', 1.0)
+                        )
+                        
+                        try:
+                            banner = banner_data.decode('utf-8').strip()
+                        except UnicodeDecodeError:
+                            banner = banner_data.decode('latin1', errors='ignore').strip()
+                            
+                    except Exception as e:
+                        self.logger.debug(f"Banner grab failed for {target}:{port} - {str(e)}")
                 
                 return {
                     'port': port,
@@ -290,11 +519,20 @@ class EnhancedK0braScanner(K0braNetworkScanner):
                     'banner': banner
                 }
                 
-            except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+            except (asyncio.TimeoutError, ConnectionRefusedError):
                 if attempt == self.max_retries - 1:
                     return None
                 await asyncio.sleep(0.1)
-
+            except Exception as e:
+                self.logger.error(f"Unexpected error scanning {target}:{port} - {str(e)}")
+                return None
+            finally:
+                if writer:
+                    try:
+                        writer.close()
+                        await writer.wait_closed()
+                    except Exception as e:
+                        self.logger.debug(f"Error closing connection to {target}:{port} - {str(e)}")
     async def show_scanning_options(self):
         """Configure advanced scanning options"""
         while True:
@@ -355,25 +593,53 @@ class EnhancedK0braScanner(K0braNetworkScanner):
                 print(colored("Invalid input", "red"))
 
     def _save_scan_history(self, results: List[HostResult], duration: float):
-        """Save scan results and metadata to history"""
-        history_entry = {
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'network': str(self.network),
-            'duration': duration,
-            'hosts_scanned': len(results),
-            'config': {
-                'batch_size': self.batch_size,
-                'timeout': self.timeout,
-                'scan_order': self.scan_order,
-                'max_retries': self.max_retries
-            },
-            'results': [asdict(host) for host in results]
-        }
+    """Save scan results and metadata to history with proper file handling"""
+    import fcntl
+    import tempfile
+    import os
+    
+    history_entry = {
+        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'network': str(self.network),
+        'duration': duration,
+        'hosts_scanned': len(results),
+        'config': {
+            'batch_size': self.batch_size,
+            'timeout': self.timeout,
+            'scan_order': self.scan_order,
+            'max_retries': self.max_retries
+        },
+        'results': [asdict(host) for host in results]
+    }
+    
+    # Use atomic write with file locking
+    history_file = 'scan_history.json'
+    temp_file = None
+    
+    try:
+        # Create temporary file
+        fd, temp_path = tempfile.mkstemp(prefix='scan_history_', dir=os.path.dirname(history_file))
+        temp_file = os.fdopen(fd, 'w')
         
-        try:
-            with open('scan_history.json', 'a') as f:
-                json.dump(history_entry, f)
-                f.write('\n')
+        # Lock the original file
+        with open(history_file, 'a+') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            
+            # Write to temp file
+            json.dump(history_entry, temp_file)
+            temp_file.write('\n')
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+            
+            # Atomic rename
+            os.rename(temp_path, history_file)
+            
+    except Exception as e:
+        self.logger.error(f"Failed to save scan history: {str(e)}")
+        raise
+    finally:
+        if temp_file:
+            temp_file.close()
         except Exception as e:
             self.logger.error(f"Failed to save scan history: {str(e)}")
 
@@ -641,25 +907,9 @@ class EnhancedK0braScanner(K0braNetworkScanner):
             elif choice == 4 or choice is None:
                 break
 
-    def export_results(self, results: List[HostResult]) -> str:
-        """Enhanced export functionality with multiple output formats"""
-        if self.output_format == 'fancy':
-            return self._fancy_format_output(results)
-        
-        elif self.output_format == 'json':
-            json_data = {
-                'scan_info': {
-                    'network': str(self.network),
-                    'start_time': self.scan_start_time,
-                    'end_time': self.scan_end_time,
-                    'duration': self.scan_end_time - self.scan_start_time if self.scan_end_time else None,
-                    'scanner_version': '0.2'
-                },
-                'hosts': [asdict(host) for host in results]
-            }
-            return json.dumps(json_data, indent=2)
-        
-        elif self.output_format == 'xml':
+     def export_results(self, results: List[HostResult]) -> str:
+        """Export scan results with proper XML handling and error checking"""
+        if self.output_format == 'xml':
             root = ET.Element('scan_results')
             
             # Add scan information
@@ -668,16 +918,21 @@ class EnhancedK0braScanner(K0braNetworkScanner):
             ET.SubElement(info, 'start_time').text = str(self.scan_start_time)
             ET.SubElement(info, 'end_time').text = str(self.scan_end_time)
             
-            # Add host results
+            # Add host results with proper error handling
             hosts = ET.SubElement(root, 'hosts')
             for host in results:
                 host_elem = ET.SubElement(hosts, 'host')
-                for key, value in asdict(host).items():
+                host_dict = asdict(host)
+                for key, value in host_dict.items():
                     if value is not None:
-                        ET.SubElement(host_elem, key).text = str(value)
+                        # Convert complex types to JSON strings
+                        if isinstance(value, (dict, list)):
+                            value = json.dumps(value)
+                        child = ET.SubElement(host_elem, key)
+                        child.text = str(value)
             
-            return ET.tostring(root, encoding='unicode', pretty_print=True)
-        
+            # Use custom pretty printing instead of lxml dependency
+            return self._pretty_print_xml(root)
         elif self.output_format == 'grep':
             # Format: host:port:protocol:service:banner
             lines = []
@@ -714,7 +969,50 @@ class EnhancedK0braScanner(K0braNetworkScanner):
                 output.append("")
             
             return '\n'.join(output)
-
+    
+def _pretty_print_xml(self, element: ET.Element, indent: str = '  ') -> str:
+    """Custom XML pretty printer without external dependencies"""
+    
+    def escape_xml(text: str) -> str:
+        return (text.replace('&', '&amp;')
+                   .replace('<', '&lt;')
+                   .replace('>', '&gt;')
+                   .replace('"', '&quot;')
+                   .replace("'", '&apos;'))
+    
+    def _format_xml(element: ET.Element, level: int = 0) -> str:
+        result = f"{indent * level}{element.tag}"
+        
+        # Handle attributes with proper escaping
+        if element.attrib:
+            attributes = [f'{k}="{escape_xml(v)}"' 
+                        for k, v in element.attrib.items()]
+            result += f" {' '.join(attributes)}"
+        
+        # Handle element content
+        if element.text and element.text.strip():
+            result += f">{escape_xml(element.text.strip())}"
+            if len(element):
+                result += "\n"
+        elif len(element):
+            result += ">"
+        else:
+            result += "/>"
+            return result
+        
+        # Handle children
+        for child in element:
+            result += f"\n{_format_xml(child, level + 1)}"
+            if child.tail and child.tail.strip():
+                result += escape_xml(child.tail.strip())
+        
+        if len(element):
+            result += f"\n{indent * level}"
+        result += f"</{element.tag}>"
+        return result
+    
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n{_format_xml(element)}'
+    
     def _fancy_format_output(self, results: List[HostResult]) -> str:
         """Create visually appealing formatted output with colors and icons"""
         output = []
@@ -969,64 +1267,74 @@ class EnhancedK0braScanner(K0braNetworkScanner):
         return f"K0bra Scanner v0.2 - Network: {self.network}, Batch Size: {self.batch_size}, " \
                f"Timeout: {self.timeout}s, Max Retries: {self.max_retries}, Scan Order: {self.scan_order}"
 
-def main():
-    """Enhanced main entry point with error handling and setup"""
+async def main(self):
+    """Main entry point with proper error handling and cleanup"""
+    def signal_handler(signum, frame):
+        raise KeyboardInterrupt()
+    
+    # Set up signal handlers
+    import signal
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
-        print(K0braNetworkScanner.BANNER)
+        if os.name != 'nt' and os.geteuid() != 0:
+            raise PermissionError("This tool requires root/sudo privileges")
+            
+        # Create cleanup task
+        cleanup_task = asyncio.create_task(self._periodic_cleanup())
         
-        # Check for root/sudo privileges
-        if not (hasattr(os, 'geteuid') and os.geteuid() == 0):
-            sys.exit("[ERROR] This tool requires root/sudo privileges")
-        
-        # Check for required packages
-        required_packages = ['termcolor', 'netifaces', 'psutil']
-        missing_packages = []
-        
-        for package in required_packages:
+        try:
+            await self.show_interactive_menu()
+        finally:
+            cleanup_task.cancel()
             try:
-                __import__(package)
-            except ImportError:
-                missing_packages.append(package)
-        
-        if missing_packages:
-            print("Missing required packages:")
-            print("  " + ", ".join(missing_packages))
-            install = input("Would you like to install them now? (y/n): ")
-            if install.lower() == 'y':
-                import subprocess
-                for package in missing_packages:
-                    try:
-                        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-                    except subprocess.CalledProcessError as e:
-                        sys.exit(f"Failed to install {package}: {e}")
-                print("Please restart the program to use the newly installed packages")
-                sys.exit(0)
-            else:
-                sys.exit("Required packages must be installed to continue")
-        
-        # Initialize and run scanner
-        scanner = EnhancedK0braScanner()
-        asyncio.run(scanner.show_interactive_menu())
-    
-    except KeyboardInterrupt:
-        print("\n[INFO] Scanner interrupted by user")
-    except Exception as e:
-        print(f"[CRITICAL] Unexpected error: {e}")
-        if hasattr(scanner, 'logger'):
-            scanner.logger.error(f"Critical error: {e}", exc_info=True)
-        sys.exit(1)
-        
-        # Initialize and run scanner
-        scanner = EnhancedK0braScanner()
-        asyncio.run(scanner.show_interactive_menu())
-    
-    except KeyboardInterrupt:
-        print(colored("\n[INFO] Scanner interrupted by user", "yellow"))
-    except Exception as e:
-        print(colored(f"[CRITICAL] Unexpected error: {e}", "red"))
-        if hasattr(scanner, 'logger'):
-            scanner.logger.error(f"Critical error: {e}", exc_info=True)
-        sys.exit(1)
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+            # Initialize scanner
+            self.scan_start_time = time.time()
+            
+            try:
+                await self.show_interactive_menu()
+            except Exception as e:
+                self.logger.error(f"Scanner error: {str(e)}")
+                raise
+            finally:
+                self.scan_end_time = time.time()
+
+        except KeyboardInterrupt:
+            print(colored("\nScanner interrupted by user", "yellow"))
+            self.logger.info("Scanner interrupted by user")
+            return 1
+        except Exception as e:
+            print(colored(f"Critical error: {str(e)}", "red"))
+            self.logger.error(f"Critical error: {str(e)}", exc_info=True)
+            return 1
+        finally:
+            pass
+
+        return 0
+
 
 if __name__ == "__main__":
-    main()
+    # Set up signal handlers
+    import signal
+    
+    def signal_handler(signum, frame):
+        raise KeyboardInterrupt()
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Run scanner
+    try:
+        scanner = EnhancedK0braScanner()
+        sys.exit(asyncio.run(scanner.main()))
+    except KeyboardInterrupt:
+        print(colored("\nScanner interrupted by user", "yellow"))
+        sys.exit(1)
+    except Exception as e:
+        print(colored(f"Critical error: {str(e)}", "red"))
+        sys.exit(1)
