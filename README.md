@@ -1,243 +1,131 @@
-# K0bra Network Scanner 🌐🔍
+# K0bra Network Scanner
 
-A powerful and flexible network scanning tool that combines the speed of RustScan with the comprehensive features of traditional network scanners. This tool provides an intuitive menu-driven interface for network discovery, port scanning, and service detection.
+A powerful and efficient network scanning tool designed for network administrators and security professionals. K0bra has evolved from its original Python implementation to a high-performance C version, offering enhanced speed and capabilities.
 
-## Features
+## 🚨 Ethical Usage Warning
 
-The Network Scanner brings together the best features of multiple scanning tools while adding new capabilities:
+This tool is intended **ONLY** for authorized network security testing and network administration purposes. Usage of this scanner without explicit permission from network owners is prohibited and may be illegal in your jurisdiction. The authors and maintainers assume no liability for misuse of this software.
 
-### Core Scanning Features
-- Advanced port scanning with configurable batch sizes and timeouts
-- Comprehensive service detection and banner grabbing
-- Multiple host discovery methods (ARP, ICMP, TCP)
-- Support for custom port ranges and specific port lists
-- Adaptive scanning with empty range skipping
-- Random and sequential port scanning modes
+## 🔄 Version History
 
-### Performance Optimizations
-- Concurrent scanning with configurable worker pools
-- Automatic resource limit management
-- Configurable retry mechanisms for improved accuracy
-- Rate limiting capabilities to avoid network saturation
-- Batch processing with dynamic sizing
+### Current Version (2.0) - C Implementation
+- Multi-threaded port scanning
+- Real-time banner grabbing
+- Enhanced performance through native C implementation
+- Color-coded terminal output
+- Progress tracking with visual progress bar
+- Comprehensive service detection
+- Built-in network interface management
 
-### Output Options
-- Multiple output formats (fancy, JSON, XML, text)
-- Greppable output for automation
-- Verbose logging capabilities
-- Custom output paths and formats
-- Real-time scan progress indicators
+### Legacy Version (1.0) - Python Implementation
+- Basic network scanning capabilities
+- Single-threaded operation
+- Cross-platform compatibility
+- Easier to modify and extend
+- Lower system requirements
 
-### Advanced Features
-- Proxy support for anonymous scanning
-- Custom User-Agent configuration
-- Rate limiting and throttling
-- Integration with custom scripts
-- Configuration saving and loading
+## ✨ Features
 
-## Installation
+- Network range scanning using CIDR notation
+- Automatic network interface detection
+- Service identification for common ports
+- Banner grabbing for service identification
+- Multi-threaded scanning for improved performance
+- Real-time progress monitoring
+- Detailed port and service reporting
+- Summary statistics after scan completion
 
-### Prerequisites
-- Python 3.7 or higher
-- Root/sudo privileges (required for raw socket operations)
+## 🛠 Requirements
 
-### Required Python Packages
+### C Version (2.0)
+- GCC compiler
+- POSIX-compliant operating system (Linux/Unix)
+- Root/sudo privileges
+- pthread library
+- Standard C networking libraries
+
+## 📦 Installation
+
 ```bash
-pip install -r requirements.txt
-```
-
-The requirements.txt should contain:
-```
-scapy>=2.4.5
-termcolor>=1.1.0
-ipaddress>=1.0.23
-```
-
-### Installation Steps
-
-1. Clone the repository:
-```bash
-git clone https://github.com/q4n0/k0bra.git
+# Clone the repository
+git clone https://github.com/0xb0rn3/k0bra.git
 cd k0bra
+
+# For C version (2.0)
+gcc k0bra.c -o k0bra -pthread
+
 ```
 
-2. Install dependencies:
+## 🚀 Usage
+
+### C Version (2.0)
 ```bash
-pip install -r requirements.txt
+# Run with sudo privileges
+sudo ./k0bra
+
+# Follow the interactive prompts to:
+# 1. Select network interface
+# 2. Enter target network in CIDR format (e.g., 192.168.1.0/24)
 ```
 
-3. Make the script executable:
-```bash
-chmod +x k0bra.py
+## 🎯 Output Example
+
+```
+    ██╗  ██╗ ██████╗ ██████╗ ██████╗  █████╗ 
+    ██║ ██╔╝██╔═══██╗██╔══██╗██╔══██╗██╔══██╗
+    █████╔╝ ██║   ██║██████╔╝██████╔╝███████║
+    ██╔═██╗ ██║   ██║██╔══██╗██╔══██╗██╔══██║
+    ██║  ██╗╚██████╔╝██████╔╝██║  ██║██║  ██║
+    ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+    Advanced Network Scanner v2.0
+
+[+] Host 192.168.1.1: 3 ports (Response: 1s)
+    → 80/tcp - HTTP
+    → 443/tcp - HTTPS
+    → 22/tcp - SSH
 ```
 
-## Usage
+## 🔍 Features Comparison
 
-### Basic Usage
+| Feature                  | C Version (2.0) | Python Version (1.0) |
+|-------------------------|-----------------|---------------------|
+| Multi-threading         | ✅              | ❌                  |
+| Banner Grabbing         | ✅              | ❌                  |
+| Progress Bar            | ✅              | ❌                  |
+| Color Output            | ✅              | ❌                  |
+| Cross-platform          | ❌              | ✅                  |
+| Memory Efficiency       | ✅              | ❌                  |
+| Execution Speed         | ✅              | ❌                  |
+| Ease of Modification    | ❌              | ✅                  |
 
-Start the scanner with:
-```bash
-sudo python3 k0bra.py
-```
+## 🤝 Contributing
 
-This will launch the interactive menu interface where you can configure and run scans.
+While this project doesn't have a formal license, contributions are welcome through pull requests. Please ensure any modifications maintain the ethical use requirements and include appropriate documentation.
 
-### Menu System
+## 👤 Author and Maintainer
 
-The tool features a hierarchical menu system:
+- **0xb0rn3**
+  - GitHub: [@0xb0rn3](https://github.com/0xb0rn3)
 
-1. Main Menu
-   - Set target network
-   - Configure scan options
-   - Configure performance settings
-   - Configure output settings
-   - Advanced options
-   - Start scan
-   - Save/Load configuration
+## ⚠️ Disclaimer
 
-2. Scan Options
-   - Port range configuration
-   - Custom port selection
-   - Service detection settings
-   - Banner grabbing options
-   - Scan order selection
+This tool is provided as-is without any warranties. Users are solely responsible for ensuring they have appropriate authorization before scanning any networks. The authors and maintainers are not responsible for any misuse or damage caused by this tool.
 
-3. Performance Settings
-   - Batch size adjustment
-   - Timeout configuration
-   - Resource limit settings
-   - Worker pool size
-   - Retry attempts
+## 🔐 Security Considerations
 
-4. Output Settings
-   - Format selection
-   - Verbose mode
-   - Greppable output
-   - Custom output paths
+- Always obtain explicit permission before scanning any network
+- Be aware that aggressive scanning can trigger security systems
+- Some networks may block or blacklist scanning activities
+- Certain ports or services may be restricted in your jurisdiction
+- Handle banner information and scan results securely
 
-### Example Configurations
+## 🐛 Known Issues
 
-#### Quick Scan
-```python
-network: 192.168.1.0/24
-port_range: 1-1000
-batch_size: 500
-timeout_ms: 1500
-scan_order: serial
-```
+- C version requires POSIX compliance and may not work on Windows
+- Root privileges required for low-level socket operations
+- Some antivirus software may flag the scanner
+- Banner grabbing may timeout on slow connections
 
-#### Thorough Scan
-```python
-network: 192.168.1.0/24
-port_range: 1-65535
-batch_size: 100
-timeout_ms: 3000
-max_retries: 3
-aggressive_scan: true
-```
+## 📞 Support
 
-#### Stealth Scan
-```python
-network: 192.168.1.0/24
-port_range: 1-1000
-batch_size: 50
-timeout_ms: 2000
-rate_limit: 100
-proxy: socks5://127.0.0.1:9050
-```
-
-## Best Practices
-
-### Performance Optimization
-- Start with smaller port ranges and adjust based on network conditions
-- Use appropriate batch sizes for your network (default: 500)
-- Enable skip_empty_ranges for faster scans
-- Adjust timeouts based on network latency
-
-### Network Consideration
-- Use rate limiting on sensitive networks
-- Enable aggressive_scan only when necessary
-- Consider proxy usage for sensitive scans
-- Monitor system resources during large scans
-
-### Output Management
-- Use JSON format for programmatic processing
-- Enable verbose mode for debugging
-- Use greppable output for automation
-- Save configurations for repeated scans
-
-## Advanced Usage
-
-### Custom Scripts Integration
-
-Create custom scripts for post-scan processing:
-```python
-# custom_script.py
-def process_results(scan_results):
-    # Process scan results
-    pass
-```
-
-### Configuration Files
-
-Save and load scan configurations:
-```json
-{
-  "network": "192.168.1.0/24",
-  "port_range": "1-1000",
-  "batch_size": 500,
-  "timeout_ms": 1500,
-  "scan_order": "serial",
-  "aggressive_scan": false
-}
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. Permission Errors
-```bash
-sudo python3 k0bra.py
-```
-
-2. Resource Limits
-```bash
-ulimit -n 5000
-```
-
-3. Network Timeouts
-- Adjust timeout_ms setting
-- Reduce batch_size
-- Enable max_retries
-
-## Contributing
-
-Contributions are welcome! Please read my contributing guidelines before submitting pull requests.
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Submit a pull request
-
-## Acknowledgments
-
-- RustScan for inspiration on performance features
-- Nmap for service detection techniques
-- The Python networking community
-
-## Security Considerations
-
-This tool should be used responsibly and only on networks you have permission to scan. Unauthorized scanning may be illegal in your jurisdiction.
-
-## Support
-
-For issues and feature requests, please use the GitHub issue tracker or contact the maintainers directly.
-
----
-Created by [b0urn3]  
-GitHub: [github.com/q4n0]  
-Version: 0.2
-
-Remember to scan responsibly and always obtain proper authorization before scanning any network.
+For bugs, feature requests, or security concerns, please open an issue on the GitHub repository. Note that response times may vary, and not all feature requests can be accommodated.
